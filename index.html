@@ -11,7 +11,7 @@
 <link rel="apple-touch-icon" href="icons/icon-192.png">
 <link rel="stylesheet" href="vendor/fonts/fonts.css">
 <script src="vendor/pdf.min.js"></script>
-<script src="runtime.js?v=1.0.6-beta"></script>
+<script src="runtime.js?v=1.0.7-beta"></script>
 <style>
 :root{
   --bg:#EEF2F1; --surface:#FFFFFF; --sunk:#F5F7F6; --ink:#16252B; --muted:#56666C; --line:#CFD8D6;
@@ -621,6 +621,11 @@ window.addEventListener('ai-config-changed',()=>{samplePromise=null;getSample().
 
 if(window.pdfjsLib){pdfjsLib.GlobalWorkerOptions.workerSrc='vendor/pdf.worker.min.js';}
 
+async function ensurePdfJs(){ // pdf.js missing on the site: take the same version from cdnjs
+  const v='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/';
+  try{await new Promise((res,rej)=>{const sc=document.createElement('script');sc.src=v+'pdf.min.js';sc.onload=res;sc.onerror=rej;document.head.appendChild(sc);});
+    pdfjsLib.GlobalWorkerOptions.workerSrc=v+'pdf.worker.min.js';}catch(e){}
+}
 async function pdfToTextAndImages(file,maxImages){
   const buf=await file.arrayBuffer();
   const pdf=await pdfjsLib.getDocument({data:buf,isEvalSupported:false}).promise;
@@ -694,6 +699,7 @@ async function parseFile(doc,file){
     if(sample)limits=await sample.limits().catch(()=>null);
     const maxImg=limits?.images?.maxCount||0;
     if(file.type==='application/pdf'||/\.pdf$/i.test(file.name)){
+      if(!window.pdfjsLib)await ensurePdfJs();
       if(!window.pdfjsLib)throw{code:'nopdf'};
       let previews;({text,imgs,previews}=await pdfToTextAndImages(file,maxImg||3));PREVIEW.set(doc.id,previews);
     }else if(file.type.startsWith('image/')){imgs=[file];PREVIEW.set(doc.id,[URL.createObjectURL(file)]);}
@@ -1497,7 +1503,8 @@ async function makeOfficialPdf(btn,kind){
     const PP=FORM_PERS[key]||{};let heb=null;
     const names=persons().some(i=>S.persons[i].name||S.persons[i].lastName);
     if(names&&HEB_FONT_URL){try{await loadScript(FONTKIT_SRC);doc.registerFontkit(window.fontkit);
-      heb=await doc.embedFont(await (await fetch(HEB_FONT_URL)).arrayBuffer(),{subset:true});}catch(e){heb=null;}}
+      let fr=await fetch(HEB_FONT_URL).catch(()=>null);if((!fr||!fr.ok)&&(window.CDN_FALLBACK||{})[HEB_FONT_URL])fr=await fetch(window.CDN_FALLBACK[HEB_FONT_URL]);
+      heb=await doc.embedFont(await fr.arrayBuffer(),{subset:true});}catch(e){heb=null;}}
     const center=(f,s,ent,size=10)=>{if(!ent||!s)return;pages[ent.p].drawText(s,{x:ent.cx-f.widthOfTextAtSize(s,size)/2,y:ent.y,size,font:f,color:ink});};
     persons().forEach(i=>{const p=S.persons[i],E=PP[i===0?'reg':'sp'];if(!E)return;
       if(heb){center(heb,visualHeb(p.name),E.first);center(heb,visualHeb(p.lastName),E.last);}
@@ -1525,12 +1532,13 @@ async function makeOfficialPdf(btn,kind){
     let dl=null;try{dl=window.claude?.use?await window.claude.use('downloads'):null;}catch(e){}
     if(dl){try{await dl.save({filename:`official-${kind}-${Y}.pdf`,data:blob});}catch(e){if(e.code!=='declined')alert('השמירה לא הצליחה. נסו שוב.');}}
     else alert('השמירה לא הצליחה.');
-  }catch(e){alert('לא הצלחנו למלא את הטופס הרשמי. נסו שוב, או הפיקו דף מילוי.');}
+  }catch(e){alert(e&&e.message==='fetch'?`הטופס הרשמי (${FORM_URLS[key]}) לא נמצא באתר. ודאו שהתיקייה forms הועלתה, או הפיקו דף מילוי.`:'לא הצלחנו למלא את הטופס הרשמי. נסו שוב, או הפיקו דף מילוי.');}
   finally{btn.disabled=false;btn.textContent=label;}
 }
 
 /* ---- PDF report ---- */
-function loadScript(src){return new Promise((res,rej)=>{if(document.querySelector(`script[src="${src}"]`)&&(src.includes('html2canvas')?window.html2canvas:window.jspdf))return res();const sc=document.createElement('script');sc.src=src;sc.onload=res;sc.onerror=()=>rej(new Error('load'));document.head.appendChild(sc);});}
+function loadScript(src){return new Promise((res,rej)=>{if(document.querySelector(`script[src="${src}"]`)&&(src.includes('html2canvas')?window.html2canvas:window.jspdf))return res();const sc=document.createElement('script');sc.src=src;sc.onload=res;sc.onerror=()=>{const alt=(window.CDN_FALLBACK||{})[src]; // a library missing on the site: load the same version from a CDN
+  if(!alt)return rej(new Error('load'));const s2=document.createElement('script');s2.src=alt;s2.onload=res;s2.onerror=()=>rej(new Error('load'));document.head.appendChild(s2);};document.head.appendChild(sc);});}
 function bracketRows(income,Y){const rows=[];let rem=Math.max(income,0),prev=0;for(const[m,r]of TAX.brackets[Y]){const top=m*12,u=Math.min(rem,top-prev);if(u>0)rows.push({from:prev,to:prev+u,rate:r,tax:u*r});rem-=u;prev=top;if(rem<=0)break;}return rows;}
 const rm=v=>`${nf.format(Math.round(v||0))} ₪`;
 const docStatus=d=>d.fromFile?(d.verified?(d.edited?.length?'פוענח ואומת, תוקן':'פוענח ואומת'):'ממתין לאימות, לא נכלל'):'הוזן ידנית';
