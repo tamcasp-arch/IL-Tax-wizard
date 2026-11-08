@@ -640,8 +640,8 @@ async function pdfToTextAndImages(file,maxImages){
     if(scanned&&i<=maxImages)imgs.push(await new Promise(r=>c.toBlob(r,'image/png')));}
   return {text:normalizeDigits(text),imgs,previews};
 }
-function normalizeDigits(t){ // "1 2 3 , 4 5 6" -> "123,456"
-  return t.replace(/(?<=\d)[ \u00A0](?=[\d,.](?:[ \u00A0]?\d))/g,'').replace(/[\u200e\u200f]/g,'');
+function normalizeDigits(t){ // "3 0 0 , 0 0 0" (spaced digits, e.g. Hilan) -> "300,000"; leaves "158 300,000" (code + amount) apart
+  return t.replace(/(?<![\d,.])\d(?![\d,.])(?:[ \u00A0][\d,.](?![\d,.])){2,}/g,m=>m.replace(/[ \u00A0]/g,'')).replace(/[\u200e\u200f]/g,'');
 }
 
 const EXTRACT_PROMPT=(year,text)=>`You are extracting data from ONE Israeli tax document for an annual tax-refund calculation (tax year expected: ${year}).

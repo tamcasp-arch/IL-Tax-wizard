@@ -111,7 +111,7 @@
   if('serviceWorker' in navigator&&location.protocol.startsWith('http'))window.addEventListener('load',()=>navigator.serviceWorker.register('sw.js').catch(()=>{}));
 
   /* ---------- distribution build: version, local OCR, terms, updates ---------- */
-  const APP_VERSION='1.0.0-beta';
+  const APP_VERSION='1.0.1-beta';
   const TERMS_VER='1';
 
   /* local OCR for scans and photos (Tesseract, Hebrew) — runs in the browser, nothing is uploaded */
