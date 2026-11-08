@@ -11,7 +11,7 @@
 <link rel="apple-touch-icon" href="icons/icon-192.png">
 <link rel="stylesheet" href="vendor/fonts/fonts.css">
 <script src="vendor/pdf.min.js"></script>
-<script src="runtime.js?v=1.0.5-beta"></script>
+<script src="runtime.js?v=1.0.6-beta"></script>
 <style>
 :root{
   --bg:#EEF2F1; --surface:#FFFFFF; --sunk:#F5F7F6; --ink:#16252B; --muted:#56666C; --line:#CFD8D6;
@@ -699,19 +699,29 @@ async function parseFile(doc,file){
     }else if(file.type.startsWith('image/')){imgs=[file];PREVIEW.set(doc.id,[URL.createObjectURL(file)]);}
     else throw{code:'type'};
     RAW.set(doc.id,text);
+    if(!text.trim()&&!imgs.length)throw{code:'empty'};
+    // 1) AI read, when available
+    let aiErr=null,aiSnap=null;
+    if(sample&&(text.replace(/\s/g,'').length>20||(imgs.length&&limits?.images))){
+      try{const opts={modelTier:'default'};if(imgs.length&&limits?.images)opts.images=imgs.slice(0,maxImg);
+        const j=await sample.json(EXTRACT_PROMPT(S.year,text),opts);applyExtraction(doc,j);
+        if(doc.type!=='form106'||n(doc.fields.salary)>0)return;          // got what we need
+        aiSnap=JSON.parse(JSON.stringify(doc));aiErr={code:'weak'};       // a 106 without salary: try the offline read too
+      }catch(e){if(e?.code==='cancelled')throw e;aiErr=e;}
+    }
+    // 2) offline read (no AI, or the AI read failed); keeps whichever read found more
+    const sample0=sample;{const sample=null;
     if(!sample){localGuess(doc,text);
       if(!(n(doc.fields.salary)>0&&doc.fields.withheld!==undefined)&&imgs.length){ // text layer unreadable or incomplete: read the page image
         const keep={af:doc.allFields,f:doc.fields,ev:doc.evidence};const t2=await maybeOcr(doc,text,imgs,true);
         if(doc.ocr){localGuess(doc,t2);const score=a=>(a||[]).filter(r=>r.map).length;
           if(score(doc.allFields)<score(keep.af)){doc.allFields=keep.af;doc.fields=keep.f;doc.evidence=keep.ev;doc.orig={...doc.fields};doc.ocr=false;RAW.set(doc.id,text);}
           else{doc.status='manual';doc.err=score(doc.allFields)?'זוהה מתמונת המסמך במכשיר שלך (OCR). השוו כל שדה מול המסמך.':'לא זוהו נתונים במסמך. מלאו ידנית, או נסו קובץ חד וישר יותר.';return;}}}
-      doc.status='manual';doc.err=(doc.allFields&&doc.allFields.length)?'פוענח מקומית לפי קודי השדות שבטקסט הקובץ. השוו כל שדה מול המסמך. לפענוח מדויק יותר, הגדירו מפתח API בהגדרות.':'לא נמצאו קודי שדות בטקסט הקובץ. מלאו ידנית, או הגדירו מפתח API לפענוח אוטומטי.';return;}
-    if(!text.trim()&&!imgs.length)throw{code:'empty'};
-    if(imgs.length&&!limits?.images){localGuess(doc,text);doc.status='manual';doc.err='זה מסמך סרוק. לפענוח שלו נדרש מפתח API בהגדרות, או מלאו ידנית.';return;}
-    const opts={modelTier:'default'};
-    if(imgs.length)opts.images=imgs.slice(0,maxImg);
-    const j=await sample.json(EXTRACT_PROMPT(S.year,text),opts);
-    applyExtraction(doc,j);
+      doc.status='manual';doc.err=(doc.allFields&&doc.allFields.length)?'פוענח מקומית לפי קודי השדות שבטקסט הקובץ. השוו כל שדה מול המסמך.':'לא נמצאו קודי שדות בטקסט הקובץ. מלאו ידנית.';
+      if(aiSnap&&(aiSnap.allFields||[]).filter(r=>r.map).length>(doc.allFields||[]).filter(r=>r.map).length){Object.assign(doc,aiSnap);}
+      else if(aiErr&&sample0)doc.err+=' (הפענוח עם Claude נכשל, ולכן נעשה פענוח מקומי.)';
+      if(doc.ocrFailed)doc.err+=` זיהוי הטקסט מהתמונה נכשל${doc.ocrErr?': '+doc.ocrErr:''}.`;
+      if(!doc.orig)doc.orig={...doc.fields};return;}}
   }catch(e){
     doc.status='error';
     doc.err={bad_key:'מפתח ה־API נדחה. בדקו אותו בהגדרות.',bad_model:'שם המודל בהגדרות לא נמצא.',not_granted:'לא הוגדר מפתח API. הגדירו אותו בהגדרות, או מלאו ידנית.',rate_limited:'יותר מדי בקשות כרגע. נסו שוב בעוד דקה.',invalid_json:'התשובה לא התקבלה במבנה תקין. לחצו "פענח שוב".',nopdf:'רכיב קריאת ה־PDF לא נטען. רעננו את הדף.',type:'סוג קובץ לא נתמך. העלו PDF או תמונה.',empty:'לא נמצא טקסט או תמונה בקובץ.',image_rejected:'התמונה לא התקבלה (גודל או פורמט). נסו קובץ אחר.'}[e?.code]||'הפענוח נכשל. אפשר לנסות שוב או למלא ידנית.';

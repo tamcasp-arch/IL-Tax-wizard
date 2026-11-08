@@ -89,6 +89,10 @@
       <h3 style="margin:16px 0 4px;font-size:17px">גיבוי והעברה בין מכשירים</h3>
       <p class="hint" style="margin:0 0 10px">הנתונים נשמרים במכשיר הזה בלבד. כדי להעביר למכשיר אחר, שמרו גיבוי ופתחו אותו שם. המפתח לא נכלל בגיבוי.</p>
       <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn ghost small" id="setBackup">שמירת גיבוי</button><button class="btn ghost small" id="setRestore">שחזור מגיבוי</button><input type="file" id="setFile" accept="application/json,.json" class="hidden"></div>
+      <h3 style="margin:16px 0 4px;font-size:17px">בדיקת תקינות</h3>
+      <p class="hint" style="margin:0 0 8px">בודק שכל רכיבי הפענוח נמצאים באתר ונטענים: קריאת PDF, זיהוי טקסט ונתוני העברית.</p>
+      <button class="btn ghost small" id="setHealth">הרצת בדיקה</button>
+      <pre id="healthOut" style="white-space:pre-wrap;font-size:13px;margin:8px 0 0;direction:rtl"></pre>
       <h3 style="margin:16px 0 4px;font-size:17px">גרסה ועדכונים</h3>
       <p class="hint" style="margin:0 0 10px">הגרסה שפועלת עכשיו: <b><bdi dir="ltr">${APP_VERSION}</bdi></b>. אם העלית גרסה חדשה והיא לא מופיעה, "עדכון מלא" מוחק את העותק השמור של האפליקציה וטוען אותה מחדש. הנתונים שלך לא נמחקים.</p>
       <button class="btn ghost small" id="setRefresh">עדכון מלא</button>
@@ -104,6 +108,17 @@
     d.querySelector('#setRestore').onclick=()=>d.querySelector('#setFile').click();
     d.querySelector('#setFile').onchange=e=>{const f=e.target.files[0];if(f)restore(f);e.target.value='';};
     d.querySelector('#setClose').onclick=()=>d.close();
+    d.querySelector('#setHealth').onclick=async()=>{const out=d.querySelector('#healthOut');out.textContent='בודק…';const L=[];
+      const files=['vendor/pdf.min.js','vendor/pdf.worker.min.js','vendor/tesseract/tesseract.min.js','vendor/tesseract/worker.min.js','vendor/tesseract/core/tesseract-core-lstm.wasm.js','vendor/tesseract/core/tesseract-core-simd-lstm.wasm.js','vendor/tesseract/lang/heb.traineddata.gz','vendor/tesseract/lang/eng.traineddata.gz','vendor/pdf-lib.min.js','vendor/fontkit.umd.min.js'];
+      let miss=0;for(const f of files){try{const r=await fetch(f+'?check='+Date.now(),{method:'HEAD',cache:'no-store'});if(!r.ok){miss++;L.push('✗ חסר: '+f);}}catch(e){miss++;L.push('✗ לא נגיש: '+f);}}
+      if(!miss)L.push('✓ כל הקבצים נמצאים באתר');
+      L.push(window.pdfjsLib?'✓ קריאת PDF נטענה':'✗ קריאת PDF לא נטענה');
+      if(!miss){try{out.textContent=L.join('\n')+'\nבודק זיהוי טקסט (עד דקה בפעם הראשונה)…';const w=await getOcr();
+        const c=document.createElement('canvas');c.width=300;c.height=80;const g=c.getContext('2d');g.fillStyle='#fff';g.fillRect(0,0,300,80);g.fillStyle='#000';g.font='bold 36px Arial';g.fillText('158 42,772',20,52);
+        const {data}=await w.recognize(await new Promise(res=>c.toBlob(res)));L.push(/158/.test(data.text)&&/42,?772/.test(data.text)?'✓ זיהוי טקסט עובד':'⚠ זיהוי טקסט רץ אבל קרא: '+data.text.trim());}
+        catch(e){L.push('✗ זיהוי טקסט נכשל: '+(e&&e.message||e));}}
+      L.push('גרסה: '+APP_VERSION+(getCfg().key?' · מפתח API מוגדר':' · בלי מפתח API'));
+      out.textContent=L.join('\n');};
     d.querySelector('#setRefresh').onclick=async()=>{msg('מעדכן…');
       try{const regs=await navigator.serviceWorker?.getRegistrations?.()||[];await Promise.all(regs.map(x=>x.unregister()));
         const ks=await caches.keys();await Promise.all(ks.map(k=>caches.delete(k)));}catch(e){}
@@ -118,7 +133,7 @@
   if('serviceWorker' in navigator&&location.protocol.startsWith('http'))window.addEventListener('load',()=>navigator.serviceWorker.register('sw.js').catch(()=>{}));
 
   /* ---------- distribution build: version, local OCR, terms, updates ---------- */
-  const APP_VERSION='1.0.5-beta';
+  const APP_VERSION='1.0.6-beta';
   const TERMS_VER='1';
 
   /* local OCR for scans and photos (Tesseract, Hebrew) — runs in the browser, nothing is uploaded */
@@ -139,7 +154,7 @@
       window.__ocrProg=null;doc.ocr=true;
       try{RAW.set(doc.id,out);}catch(e){}
       return out;
-    }catch(e){window.__ocrProg=null;doc.ocrFailed=true;return text;}
+    }catch(e){window.__ocrProg=null;doc.ocrFailed=true;doc.ocrErr=(e&&(e.message||e.type))?String(e.message||e.type).slice(0,120):'רכיב זיהוי הטקסט לא נטען';return text;}
   };
 
   const TERMS_HTML=`<h2 id="termsTitle" style="font-family:var(--serif);margin:0 0 8px">תנאי שימוש</h2>

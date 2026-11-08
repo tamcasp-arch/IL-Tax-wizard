@@ -1,6 +1,6 @@
 /* Service worker. Raise APP_VERSION in runtime.js and rebuild: VERSION follows it. */
-const VERSION='taxwiz-1.0.5-beta';
-const SHELL=["./", "index.html", "manifest.webmanifest", "icons/icon-192.png", "icons/icon-512.png", "icons/icon-maskable-512.png", "runtime.js?v=1.0.5-beta"];
+const VERSION='taxwiz-1.0.6-beta';
+const SHELL=["./", "index.html", "manifest.webmanifest", "icons/icon-192.png", "icons/icon-512.png", "icons/icon-maskable-512.png", "runtime.js?v=1.0.6-beta"];
 const STATIC=["vendor/pdf.min.js", "vendor/pdf.worker.min.js", "vendor/html2canvas.min.js", "vendor/jspdf.umd.min.js", "vendor/pdf-lib.min.js", "vendor/fontkit.umd.min.js", "vendor/fonts/fonts.css", "vendor/fonts/assistant-hebrew-400-normal.woff", "vendor/fonts/assistant-hebrew-400-normal.woff2", "vendor/fonts/assistant-latin-400-normal.woff2", "vendor/fonts/assistant-hebrew-600-normal.woff2", "vendor/fonts/assistant-latin-600-normal.woff2", "vendor/fonts/assistant-hebrew-700-normal.woff2", "vendor/fonts/assistant-latin-700-normal.woff2", "vendor/fonts/frank-ruhl-libre-hebrew-500-normal.woff2", "vendor/fonts/frank-ruhl-libre-latin-500-normal.woff2", "vendor/fonts/frank-ruhl-libre-hebrew-700-normal.woff2", "vendor/fonts/frank-ruhl-libre-latin-700-normal.woff2"];
 self.addEventListener('install',e=>{e.waitUntil(caches.open(VERSION).then(c=>c.addAll([...SHELL,...STATIC].map(u=>new Request(u,{cache:'reload'})))).then(()=>self.skipWaiting()));});
 self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==VERSION).map(k=>caches.delete(k)))).then(()=>self.clients.claim()));});
