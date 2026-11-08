@@ -89,6 +89,9 @@
       <h3 style="margin:16px 0 4px;font-size:17px">גיבוי והעברה בין מכשירים</h3>
       <p class="hint" style="margin:0 0 10px">הנתונים נשמרים במכשיר הזה בלבד. כדי להעביר למכשיר אחר, שמרו גיבוי ופתחו אותו שם. המפתח לא נכלל בגיבוי.</p>
       <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn ghost small" id="setBackup">שמירת גיבוי</button><button class="btn ghost small" id="setRestore">שחזור מגיבוי</button><input type="file" id="setFile" accept="application/json,.json" class="hidden"></div>
+      <h3 style="margin:16px 0 4px;font-size:17px">גרסה ועדכונים</h3>
+      <p class="hint" style="margin:0 0 10px">הגרסה שפועלת עכשיו: <b><bdi dir="ltr">${APP_VERSION}</bdi></b>. אם העלית גרסה חדשה והיא לא מופיעה, "עדכון מלא" מוחק את העותק השמור של האפליקציה וטוען אותה מחדש. הנתונים שלך לא נמחקים.</p>
+      <button class="btn ghost small" id="setRefresh">עדכון מלא</button>
       <div style="display:flex;justify-content:flex-end;margin-top:18px"><button class="btn" id="setClose">סגירה</button></div></div>`;
     const msg=t=>{d.querySelector('#setMsg').textContent=t;};
     const changed=()=>window.dispatchEvent(new Event('ai-config-changed'));
@@ -101,6 +104,10 @@
     d.querySelector('#setRestore').onclick=()=>d.querySelector('#setFile').click();
     d.querySelector('#setFile').onchange=e=>{const f=e.target.files[0];if(f)restore(f);e.target.value='';};
     d.querySelector('#setClose').onclick=()=>d.close();
+    d.querySelector('#setRefresh').onclick=async()=>{msg('מעדכן…');
+      try{const regs=await navigator.serviceWorker?.getRegistrations?.()||[];await Promise.all(regs.map(x=>x.unregister()));
+        const ks=await caches.keys();await Promise.all(ks.map(k=>caches.delete(k)));}catch(e){}
+      location.replace(location.pathname+'?v='+Date.now());};
     if(!d.open)d.showModal();
   }
   document.addEventListener('DOMContentLoaded',()=>{
@@ -111,7 +118,7 @@
   if('serviceWorker' in navigator&&location.protocol.startsWith('http'))window.addEventListener('load',()=>navigator.serviceWorker.register('sw.js').catch(()=>{}));
 
   /* ---------- distribution build: version, local OCR, terms, updates ---------- */
-  const APP_VERSION='1.0.4-beta';
+  const APP_VERSION='1.0.5-beta';
   const TERMS_VER='1';
 
   /* local OCR for scans and photos (Tesseract, Hebrew) — runs in the browser, nothing is uploaded */
@@ -167,7 +174,7 @@
       #appBanner{position:fixed;inset-inline:12px;bottom:calc(12px + env(safe-area-inset-bottom,0px));z-index:60;display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap;background:var(--surface);border:1px solid var(--line);border-inline-start:4px solid var(--warn);border-radius:12px;padding:10px 14px;box-shadow:0 8px 30px rgba(0,0,0,.18)}
       .beta{font-size:12px;font-weight:700;color:var(--warn);border:1px solid currentColor;border-radius:999px;padding:1px 8px;vertical-align:middle;margin-inline-start:8px}`;
     document.head.appendChild(st);
-    const h1=document.querySelector('header.top h1');if(h1)h1.insertAdjacentHTML('beforeend','<span class="beta">בטא</span>');
+    const h1=document.querySelector('header.top h1');if(h1)h1.insertAdjacentHTML('beforeend',`<span class="beta" title="גרסה ${APP_VERSION}">בטא <bdi dir="ltr">${APP_VERSION.replace('-beta','')}</bdi></span>`);
     const slot=document.querySelector('header.top > div:last-child');
     if(slot){const t=document.createElement('button');t.className='btn ghost small';t.textContent='תנאי שימוש';t.onclick=()=>showTerms(true);slot.appendChild(t);}
     showTerms(false);
