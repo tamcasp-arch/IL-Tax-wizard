@@ -1,6 +1,6 @@
 /* Service worker: makes the app work offline after the first visit.
    Raise VERSION whenever you change any file, so devices pick up the new version. */
-const VERSION='taxwiz-1.0.1-beta';
+const VERSION='taxwiz-1.0.2-beta';
 const ASSETS=[
  "./",
  "index.html",

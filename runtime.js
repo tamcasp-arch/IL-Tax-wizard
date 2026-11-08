@@ -111,7 +111,7 @@
   if('serviceWorker' in navigator&&location.protocol.startsWith('http'))window.addEventListener('load',()=>navigator.serviceWorker.register('sw.js').catch(()=>{}));
 
   /* ---------- distribution build: version, local OCR, terms, updates ---------- */
-  const APP_VERSION='1.0.1-beta';
+  const APP_VERSION='1.0.2-beta';
   const TERMS_VER='1';
 
   /* local OCR for scans and photos (Tesseract, Hebrew) — runs in the browser, nothing is uploaded */
@@ -122,9 +122,9 @@
       logger:m=>{if(m.status==='recognizing text'&&window.__ocrProg)window.__ocrProg(Math.round(m.progress*100));}});
     return ocrWorker;
   }
-  window.maybeOcr=async function(doc,text,imgs){
+  window.maybeOcr=async function(doc,text,imgs,force){
     const real=String(text||'').replace(/\s|-|עמוד|\d/g,'').length;
-    if(!imgs||!imgs.length||real>=60)return text;
+    if(!imgs||!imgs.length||(real>=60&&!force))return text;
     const tick=pct=>{doc.err=`מזהה טקסט בצילום, במכשיר שלך… ${pct}%`;try{render();}catch(e){}};
     try{
       tick(0);const w=await getOcr();let out='';

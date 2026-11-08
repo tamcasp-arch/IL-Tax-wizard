@@ -626,9 +626,11 @@ async function pdfToTextAndImages(file,maxImages){
   const pdf=await pdfjsLib.getDocument({data:buf,isEvalSupported:false}).promise;
   let text='';const pages=Math.min(pdf.numPages,6);
   for(let i=1;i<=pages;i++){const pg=await pdf.getPage(i);const tc=await pg.getTextContent();
-    // rebuild lines by y position (helps forms whose digits are spaced, e.g. חילן)
-    const rows={};for(const it of tc.items){const y=Math.round(it.transform[5]);(rows[y]=rows[y]||[]).push(it);}
-    Object.keys(rows).sort((a,b)=>b-a).forEach(y=>{text+=rows[y].sort((a,b)=>b.transform[4]-a.transform[4]).map(t=>t.str).join(' ')+'\n';});
+    // rebuild lines by y position, with tolerance: a code and its amount are often printed a point or two apart
+    const its=tc.items.filter(t=>t.str&&t.str.trim()).sort((a,b)=>b.transform[5]-a.transform[5]),rows=[];
+    for(const it of its){const y=it.transform[5],r=rows.find(r=>Math.abs(r.y-y)<=3);if(r)r.items.push(it);else rows.push({y,items:[it]});}
+    // left to right keeps digit runs (also digit-per-item, e.g. חילן) in reading order
+    rows.forEach(r=>{text+=r.items.sort((a,b)=>a.transform[4]-b.transform[4]).map(t=>t.str).join(' ')+'\n';});
     text+='\n--- עמוד '+i+' ---\n';}
   const imgs=[],previews=[];
   const scanned=text.replace(/\s|-|עמוד|\d/g,'').length<60;
@@ -637,11 +639,11 @@ async function pdfToTextAndImages(file,maxImages){
     const c=document.createElement('canvas');c.width=vp.width;c.height=vp.height;
     await pg.render({canvasContext:c.getContext('2d'),viewport:vp}).promise;
     if(i<=3)previews.push(c.toDataURL('image/jpeg',.82));
-    if(scanned&&i<=maxImages)imgs.push(await new Promise(r=>c.toBlob(r,'image/png')));}
+    if(i<=maxImages)imgs.push(await new Promise(r=>c.toBlob(r,'image/png')));}
   return {text:normalizeDigits(text),imgs,previews};
 }
 function normalizeDigits(t){ // "3 0 0 , 0 0 0" (spaced digits, e.g. Hilan) -> "300,000"; leaves "158 300,000" (code + amount) apart
-  return t.replace(/(?<![\d,.])\d(?![\d,.])(?:[ \u00A0][\d,.](?![\d,.])){2,}/g,m=>m.replace(/[ \u00A0]/g,'')).replace(/[\u200e\u200f]/g,'');
+  return t.replace(/(?<![\d,.])\d(?![\d,.])(?:[ \u00A0][\d,.](?![\d,.])){2,}/g,m=>m.replace(/[ \u00A0]/g,'')).replace(/(\d)[ \u00A0]?,[ \u00A0]+(\d{3})(?![\d])/g,'$1,$2').replace(/[\u200e\u200f]/g,'');
 }
 
 const EXTRACT_PROMPT=(year,text)=>`You are extracting data from ONE Israeli tax document for an annual tax-refund calculation (tax year expected: ${year}).
@@ -689,7 +691,13 @@ async function parseFile(doc,file){
     }else if(file.type.startsWith('image/')){imgs=[file];PREVIEW.set(doc.id,[URL.createObjectURL(file)]);}
     else throw{code:'type'};
     RAW.set(doc.id,text);
-    if(!sample){text=await maybeOcr(doc,text,imgs);localGuess(doc,text);if(doc.ocr){doc.status='manual';doc.err=(doc.allFields&&doc.allFields.length)?'זוהה מצילום במכשיר שלך (OCR). בצילומים יש יותר טעויות, אז השוו כל שדה מול המסמך.':'לא זוהו קודי שדות בצילום. מלאו את השדות ידנית, או נסו צילום ישר וחד יותר.';return;}doc.status='manual';doc.err=(doc.allFields&&doc.allFields.length)?'פוענח מקומית לפי קודי השדות שבטקסט הקובץ. השוו כל שדה מול המסמך. לפענוח מדויק יותר, הגדירו מפתח API בהגדרות.':'לא נמצאו קודי שדות בטקסט הקובץ. מלאו ידנית, או הגדירו מפתח API לפענוח אוטומטי.';return;}
+    if(!sample){localGuess(doc,text);
+      if(!(n(doc.fields.salary)>0&&doc.fields.withheld!==undefined)&&imgs.length){ // text layer unreadable or incomplete: read the page image
+        const keep={af:doc.allFields,f:doc.fields,ev:doc.evidence};const t2=await maybeOcr(doc,text,imgs,true);
+        if(doc.ocr){localGuess(doc,t2);const score=a=>(a||[]).filter(r=>r.map).length;
+          if(score(doc.allFields)<score(keep.af)){doc.allFields=keep.af;doc.fields=keep.f;doc.evidence=keep.ev;doc.orig={...doc.fields};doc.ocr=false;RAW.set(doc.id,text);}
+          else{doc.status='manual';doc.err=score(doc.allFields)?'זוהה מתמונת המסמך במכשיר שלך (OCR). השוו כל שדה מול המסמך.':'לא זוהו נתונים במסמך. מלאו ידנית, או נסו קובץ חד וישר יותר.';return;}}}
+      doc.status='manual';doc.err=(doc.allFields&&doc.allFields.length)?'פוענח מקומית לפי קודי השדות שבטקסט הקובץ. השוו כל שדה מול המסמך. לפענוח מדויק יותר, הגדירו מפתח API בהגדרות.':'לא נמצאו קודי שדות בטקסט הקובץ. מלאו ידנית, או הגדירו מפתח API לפענוח אוטומטי.';return;}
     if(!text.trim()&&!imgs.length)throw{code:'empty'};
     if(imgs.length&&!limits?.images){localGuess(doc,text);doc.status='manual';doc.err='זה מסמך סרוק. לפענוח שלו נדרש מפתח API בהגדרות, או מלאו ידנית.';return;}
     const opts={modelTier:'default'};
@@ -705,7 +713,15 @@ const KW_MAP=[[/מבוטחת/,'insured'],[/השתלמות/,'keren'],[/(מעבי�
   [/(עובד|עמית)[^\n]*(קצבה|פנסיה|גמל)|(קצבה|פנסיה|גמל)[^\n]*(עובד|עמית)/,'pensionEmp'],[/ביטוח חיים/,'lifeIns'],[/הבראה/,'havraa'],[/מס הכנסה|שנוכה/,'withheld'],[/משכורת|חייבת|שכר עבודה/,'salary']];
 function kwMap(label){const t=[label,label.split(' ').map(w=>w.split('').reverse().join('')).reverse().join(' '),label.split('').reverse().join('')];
   for(const [re,k] of KW_MAP)if(t.some(x=>re.test(x)))return k;return '';}
-function localGuess(doc,text){ // offline: every 3-digit form code on a line with its amount; labels help when a scan misreads the code
+function localGuess(doc,text){ // tries the text as is and with digit runs reversed (some PDFs store numbers in visual order); keeps the more plausible read
+  const score=d=>(d.allFields||[]).reduce((t,r)=>t+(r.map?(n(r.value)>=100?2:0)+(r.code&&autoMap(d.type,r.code,'')===r.map?1:0):0),0);
+  localGuessOnce(doc,text);const A={af:doc.allFields,f:doc.fields,o:doc.orig,ev:doc.evidence,s:score(doc)};
+  const rev=String(text||'').replace(/\d[\d,.]*\d/g,m=>m.split('').reverse().join(''));
+  localGuessOnce(doc,rev);
+  if(score(doc)>A.s){doc.reversedDigits=true;return;}
+  doc.allFields=A.af;doc.fields=A.f;doc.orig=A.o;doc.evidence=A.ev;
+}
+function localGuessOnce(doc,text){ // offline: every 3-digit form code on a line with its amount; labels help when a scan misreads the code
   doc.type=doc.type||'form106';doc.fields=doc.fields||{};doc.evidence={};
   const rows=[],seen=new Set(),usedKw=new Set();
   for(const line of String(text||'').split('\n')){
@@ -937,6 +953,7 @@ function renderReview(){
        ${rows}
        ${d.notes?`<div class="note info">${esc(d.notes)}</div>`:''}
        ${allFieldsTable(d)}
+       ${RAW.get(d.id)?`<details style="margin-top:12px"><summary style="cursor:pointer;font-weight:700">הטקסט שחולץ מהמסמך${d.ocr?' (זיהוי טקסט מצילום)':''}</summary><p class="hint" style="margin:6px 0">כשהפענוח לא מצליח, הטקסט הזה מראה מה נקרא בפועל. אפשר להעתיק אותו לדיווח תקלה, אחרי שמוחקים ממנו שמות ומספרי זהות.</p><pre style="white-space:pre-wrap;font-size:12.5px;max-height:240px;overflow:auto;background:var(--sunk);border:1px solid var(--line);border-radius:8px;padding:8px">${esc(RAW.get(d.id).slice(0,8000))}</pre></details>`:''}
      </div>
    </div>
    <div class="rv-foot">
