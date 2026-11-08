@@ -1,6 +1,6 @@
 /* Service worker: makes the app work offline after the first visit.
    Raise VERSION whenever you change any file, so devices pick up the new version. */
-const VERSION='taxwiz-2026-11-04';
+const VERSION='taxwiz-1.0.0-beta';
 const ASSETS=[
  "./",
  "index.html",
@@ -13,6 +13,9 @@ const ASSETS=[
  "vendor/pdf.worker.min.js",
  "vendor/html2canvas.min.js",
  "vendor/jspdf.umd.min.js",
+ "vendor/pdf-lib.min.js",
+ "vendor/fontkit.umd.min.js",
+ "vendor/fonts/assistant-hebrew-400-normal.woff",
  "vendor/fonts/fonts.css",
  "vendor/fonts/assistant-hebrew-400-normal.woff2",
  "vendor/fonts/assistant-latin-400-normal.woff2",
@@ -23,7 +26,19 @@ const ASSETS=[
  "vendor/fonts/frank-ruhl-libre-hebrew-500-normal.woff2",
  "vendor/fonts/frank-ruhl-libre-latin-500-normal.woff2",
  "vendor/fonts/frank-ruhl-libre-hebrew-700-normal.woff2",
- "vendor/fonts/frank-ruhl-libre-latin-700-normal.woff2"
+ "vendor/fonts/frank-ruhl-libre-latin-700-normal.woff2",
+ "forms/1301-2020.pdf",
+ "forms/1301-2021.pdf",
+ "forms/1301-2022.pdf",
+ "forms/1301-2023.pdf",
+ "forms/1301-2024.pdf",
+ "forms/1301-2025.pdf",
+ "forms/135-2020.pdf",
+ "forms/135-2021.pdf",
+ "forms/135-2022.pdf",
+ "forms/135-2023.pdf",
+ "forms/135-2024.pdf",
+ "forms/135-2025.pdf"
 ];
 self.addEventListener('install',e=>{e.waitUntil(caches.open(VERSION).then(c=>c.addAll(ASSETS)).then(()=>self.skipWaiting()));});
 self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==VERSION).map(k=>caches.delete(k)))).then(()=>self.clients.claim()));});

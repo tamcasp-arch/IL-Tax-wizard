@@ -109,4 +109,78 @@
     const st=document.createElement('style');st.textContent='dialog#settings{border:0;padding:0;border-radius:16px;background:var(--surface);color:var(--ink);width:min(600px,94vw)}dialog#settings::backdrop{background:rgba(10,20,22,.55)}dialog#settings input[type=password],dialog#settings input#setModel{font:inherit;font-size:16px;color:var(--ink);background:var(--sunk);border:1px solid var(--line);border-radius:8px;padding:9px 11px;width:100%;direction:ltr;text-align:left}';document.head.appendChild(st);
   });
   if('serviceWorker' in navigator&&location.protocol.startsWith('http'))window.addEventListener('load',()=>navigator.serviceWorker.register('sw.js').catch(()=>{}));
+
+  /* ---------- distribution build: version, local OCR, terms, updates ---------- */
+  const APP_VERSION='1.0.0-beta';
+  const TERMS_VER='1';
+
+  /* local OCR for scans and photos (Tesseract, Hebrew) — runs in the browser, nothing is uploaded */
+  let ocrWorker=null;
+  async function getOcr(onProg){
+    if(!window.Tesseract)await new Promise((res,rej)=>{const sc=document.createElement('script');sc.src='vendor/tesseract/tesseract.min.js';sc.onload=res;sc.onerror=rej;document.head.appendChild(sc);});
+    if(!ocrWorker)ocrWorker=await Tesseract.createWorker(['heb','eng'],1,{workerPath:'vendor/tesseract/worker.min.js',corePath:'vendor/tesseract/core',langPath:'vendor/tesseract/lang',gzip:true,
+      logger:m=>{if(m.status==='recognizing text'&&window.__ocrProg)window.__ocrProg(Math.round(m.progress*100));}});
+    return ocrWorker;
+  }
+  window.maybeOcr=async function(doc,text,imgs){
+    const real=String(text||'').replace(/\s|-|עמוד|\d/g,'').length;
+    if(!imgs||!imgs.length||real>=60)return text;
+    const tick=pct=>{doc.err=`מזהה טקסט בצילום, במכשיר שלך… ${pct}%`;try{render();}catch(e){}};
+    try{
+      tick(0);const w=await getOcr();let out='';
+      for(let i=0;i<imgs.length;i++){window.__ocrProg=pct=>tick(Math.round((i*100+pct)/imgs.length));const {data}=await w.recognize(imgs[i]);out+=data.text+'\n';}
+      window.__ocrProg=null;doc.ocr=true;
+      try{RAW.set(doc.id,out);}catch(e){}
+      return out;
+    }catch(e){window.__ocrProg=null;doc.ocrFailed=true;return text;}
+  };
+
+  const TERMS_HTML=`<h2 id="termsTitle" style="font-family:var(--serif);margin:0 0 8px">תנאי שימוש</h2>
+   <p style="margin:0 0 10px;color:var(--muted)">גרסה <bdi dir="ltr">${APP_VERSION}</bdi>. גרסת בטא.</p>
+   <ol style="padding-inline-start:20px;margin:0;line-height:1.6">
+    <li><b>כלי עזר בלבד.</b> האשף מחשב הערכה לפי כללי רשות המסים לשנה שנבחרה. הוא אינו ייעוץ מס, אינו ייצוג ואינו מחליף רואה חשבון או יועץ מס.</li>
+    <li><b>לא רשמי.</b> הכלי אינו של רשות המסים ואינו קשור אליה. הטפסים הרשמיים מצורפים ללא שינוי, לצורך מילוי בלבד.</li>
+    <li><b>האחריות שלך.</b> לפני הגשה צריך לבדוק כל נתון מול המסמכים, ומומלץ להשוות לסימולטור הרשמי של רשות המסים. בקשת החזר פותחת את השנה לבדיקה, ועלולה להסתיים גם בחיוב.</li>
+    <li><b>מגבלות ידועות.</b> החישוב שנתי ולא חודשי. אין חישוב טופס 134, משמרות, פטור נכות והכנסות מחו״ל. לעצמאים, החלוקה של הפקדות הפנסיה בין ניכוי לזיכוי משוערת. פענוח צילומים במכשיר עלול לטעות, ולכן כל שדה עובר בקרה.</li>
+    <li><b>פרטיות.</b> הנתונים והמסמכים נשמרים רק בדפדפן שלך, ולא נשלחים לשום שרת. אם הגדרת מפתח API, מסמך נשלח ל־Anthropic רק כשמפענחים אותו או שואלים את היועץ. מספרי זהות ופרטי בנק נשמרים רק אם בחרת בכך.</li>
+    <li><b>בלי אחריות.</b> הכלי מסופק כמות שהוא. המפתחים אינם אחראים לנזק שייגרם מהשימוש בו או מהסתמכות על תוצאותיו.</li>
+   </ol>`;
+  function showTerms(force){
+    let d=document.getElementById('terms');
+    if(!d){d=document.createElement('dialog');d.id='terms';d.setAttribute('aria-labelledby','termsTitle');document.body.appendChild(d);}
+    const agreed=localStorage.getItem('taxwiz.terms')===TERMS_VER;
+    d.innerHTML=`<div style="padding:20px 22px;max-width:640px">${TERMS_HTML}
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px">${agreed?'<button class="btn" id="termsClose">סגירה</button>':'<button class="btn" id="termsOk">קראתי ואני מסכים/ה</button>'}</div></div>`;
+    d.addEventListener('cancel',e=>{if(!agreed)e.preventDefault();});
+    const ok=d.querySelector('#termsOk');if(ok)ok.onclick=()=>{try{localStorage.setItem('taxwiz.terms',TERMS_VER);}catch(e){}d.close();};
+    const cl=d.querySelector('#termsClose');if(cl)cl.onclick=()=>d.close();
+    if(!d.open&&(force||!agreed))d.showModal();
+  }
+  function banner(html,btn,onClick){
+    let b=document.getElementById('appBanner');
+    if(!b){b=document.createElement('div');b.id='appBanner';b.setAttribute('role','status');document.body.appendChild(b);}
+    b.innerHTML=`<span>${html}</span>${btn?`<button class="btn small" id="appBannerBtn">${btn}</button>`:''}<button class="btn ghost small" id="appBannerX" aria-label="סגירה">×</button>`;
+    if(btn)b.querySelector('#appBannerBtn').onclick=onClick;b.querySelector('#appBannerX').onclick=()=>b.remove();
+  }
+  document.addEventListener('DOMContentLoaded',()=>{
+    const st=document.createElement('style');st.textContent=`dialog#terms{border:0;padding:0;border-radius:16px;background:var(--surface);color:var(--ink);width:min(680px,94vw)}dialog#terms::backdrop{background:rgba(10,20,22,.55)}
+      #appBanner{position:fixed;inset-inline:12px;bottom:calc(12px + env(safe-area-inset-bottom,0px));z-index:60;display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap;background:var(--surface);border:1px solid var(--line);border-inline-start:4px solid var(--warn);border-radius:12px;padding:10px 14px;box-shadow:0 8px 30px rgba(0,0,0,.18)}
+      .beta{font-size:12px;font-weight:700;color:var(--warn);border:1px solid currentColor;border-radius:999px;padding:1px 8px;vertical-align:middle;margin-inline-start:8px}`;
+    document.head.appendChild(st);
+    const h1=document.querySelector('header.top h1');if(h1)h1.insertAdjacentHTML('beforeend','<span class="beta">בטא</span>');
+    const slot=document.querySelector('header.top > div:last-child');
+    if(slot){const t=document.createElement('button');t.className='btn ghost small';t.textContent='תנאי שימוש';t.onclick=()=>showTerms(true);slot.appendChild(t);}
+    showTerms(false);
+    // tax data not yet updated for the last closed year
+    try{const last=new Date().getFullYear()-1;const max=Math.max(...YEARS);
+      if(last>max)banner(`נתוני המס באפליקציה עודכנו עד שנת ${max}. לשנת ${last} החישוב עלול להיות שגוי עד שתתעדכן הגרסה.`);}catch(e){}
+  });
+  // new version: the service worker activates itself; tell the user to reload
+  if('serviceWorker' in navigator&&location.protocol.startsWith('http')){
+    const hadController=!!navigator.serviceWorker.controller;
+    navigator.serviceWorker.addEventListener('controllerchange',()=>{if(hadController)banner('הותקנה גרסה חדשה של האפליקציה.','רענון',()=>location.reload());});
+    window.addEventListener('load',()=>{navigator.serviceWorker.getRegistration().then(r=>{if(!r)return;
+      document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')r.update().catch(()=>{});});
+      setInterval(()=>r.update().catch(()=>{}),60*60*1000);});});
+  }
 })();

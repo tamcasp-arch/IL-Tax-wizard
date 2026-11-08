@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>אשף הדוח השנתי לשכירים</title>
+<title>אשף הדוח השנתי</title>
 <meta name="theme-color" content="#0D5C63">
 <meta name="description" content="אשף לחישוב החזר מס שנתי לשכירים בישראל">
 <link rel="manifest" href="manifest.webmanifest">
@@ -243,8 +243,8 @@ table.r-t tr.g td{color:#1E7A46}table.r-t tr.b td{color:#A3312A}
 <div class="shell">
   <header class="top">
     <div>
-      <h1>אשף הדוח השנתי לשכירים</h1>
-      <p>מעלים את הטפסים, עונים רק על מה שרלוונטי, ומקבלים הערכת החזר, רשימת מסמכים ומסלול הגשה לפי כללי רשות המסים.</p>
+      <h1>אשף הדוח השנתי</h1>
+      <p>לשכירים ולעצמאים: מעלים את הטפסים, עונים רק על מה שרלוונטי, ומקבלים הערכת החזר או תשלום, דפי מילוי לטפסים 135 ו־1301 ומסלול הגשה לפי כללי רשות המסים.</p>
     </div>
     <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px"><div class="yearpill" id="yearPill">שנת מס 2025</div><div id="sync" class="sync" role="status">מתחבר…</div></div>
   </header>
@@ -278,6 +278,7 @@ const TAX = {
   donMin:{2020:190,2021:190,2022:190,2023:200,2024:207,2025:207,2026:207},
   donMax:{2020:9350000,2021:9294000,2022:9517000,2023:10019808,2024:10354816,2025:10354816,2026:10354816},
   pensionCap:{2020:7392,2021:7308,2022:7476,2023:7896,2024:8148,2025:8148,2026:8148},
+  kerenSelfCeil:{2025:293397,2026:293397}, // הכנסה קובעת לקרן השתלמות לעצמאים (4.5%); לשנים אחרות יש לאמת
   yishuvCombos:[[7,146640],[10,180000],[12,186000],[12,186600],[12,213240],[12,226560],[14,180000],[14,213240],[14,219960],[14,259920],[16,226560],[18,245400],[18,259920],[20,259920],[20,267840]]
 };
 const YEARS=[2020,2021,2022,2023,2024,2025,2026];
@@ -321,7 +322,7 @@ const blankPerson=(g)=>({name:'',gender:g,side:g==='f'?'mother':'father',family:
   miluimDays:0,disabledChildren:0,yishuv:{on:false,combo:'',rate:0,ceiling:0},
   donations:0,privatePension:0,lifeIns:0,extraPoints:0,
   ev:{taxCoord:false,unemployment:false,maternity:false,kerenEarly:false,shift:false,disability:false,bonus:false,institution:false}});
-const DEFAULT={step:0,year:2025,married:true,persons:[blankPerson('m'),blankPerson('f')],children:[],docs:[],
+const DEFAULT={step:0,year:2025,married:true,bank:{},keepIds:false,persons:[blankPerson('m'),blankPerson('f')],children:[],docs:[],
   screen:{selfEmployed:false,foreign:false,rent:false,capital:false,crypto:false,options:false,severance:false}};
 /* ---------- storage: one record per tax year, local cache + private sync to the Claude account ---------- */
 const LKEY=y=>'taxwiz.v3.y'+y, MKEY='taxwiz.v3.meta';
@@ -335,12 +336,38 @@ function load(){
 }
 function seedFrom(old,y){ // a new year keeps who you are, not that year's figures
   const o=structuredClone(DEFAULT);o.year=y;o.step=old.step;o.married=old.married;o.children=structuredClone(old.children);
-  o.persons=old.persons.map((p,i)=>Object.assign(blankPerson(p.gender),{name:p.name,gender:p.gender,side:p.side,family:p.family,discharge:structuredClone(p.discharge),oleh:structuredClone(p.oleh),degree:structuredClone(p.degree),disabledChildren:p.disabledChildren,yishuv:{...p.yishuv}}));
+  o.bank={...(old.bank||{})};o.keepIds=old.keepIds;o.persons=old.persons.map((p,i)=>Object.assign(blankPerson(p.gender),{name:p.name,lastName:p.lastName,idNum:p.idNum,gender:p.gender,side:p.side,family:p.family,discharge:structuredClone(p.discharge),oleh:structuredClone(p.oleh),degree:structuredClone(p.degree),disabledChildren:p.disabledChildren,yishuv:{...p.yishuv}}));
   return o;
 }
-function serial(){const o=structuredClone(S);o.docs=o.docs.map(({rawText,...r})=>r);delete o.step;return o;}
-let S=load();
-let saveT;function save(){S.updatedAt=Date.now();clearTimeout(saveT);saveT=setTimeout(()=>{try{localStorage.setItem(LKEY(S.year),JSON.stringify(serial()));localStorage.setItem(MKEY,JSON.stringify({year:S.year,step:S.step,updatedAt:S.updatedAt}));}catch(e){}pushRemote();},300);}
+function serial(){const o=structuredClone(S);o.docs=o.docs.map(({rawText,...r})=>r);delete o.step;
+  if(!o.keepIds){o.bank={};(o.persons||[]).forEach(p=>{delete p.idNum;});} // identifiers stay in this window unless the user opts in
+  return o;}
+function idValid(id){id=String(id||'').replace(/\D/g,'');if(!id||id.length>9)return false;id=id.padStart(9,'0');let s=0;for(let i=0;i<9;i++){let d=+id[i]*((i%2)+1);s+=d>9?d-9:d;}return s%10===0;}
+function idHint(v){v=String(v||'').replace(/\D/g,'');if(!v)return 'נכתב על הטופס הרשמי';return idValid(v)?'<span style="color:var(--good)">ספרת ביקורת תקינה</span>':'<b style="color:var(--bad)">ספרת הביקורת לא תקינה. בדקו את המספר.</b>';}
+/* identity details (names, IDs, bank) are one profile shared by every tax year, synced on their own */
+const PKEY='taxwiz.v3.profile';
+function profileOf(st){return{married:st.married,keepIds:!!st.keepIds,bank:{...(st.bank||{})},
+  persons:(st.persons||[]).map(p=>({name:p.name||'',lastName:p.lastName||'',idNum:p.idNum||'',gender:p.gender}))};}
+function profileForStore(pr){const o=structuredClone(pr);if(!o.keepIds){o.bank={};o.persons.forEach(p=>{delete p.idNum;});}return o;}
+function applyProfile(st,pr){ // fill a year's state from the profile; never blank out a value this window still holds
+  if(!pr)return st;st.keepIds=!!pr.keepIds;st.bank=Object.assign({},st.bank||{},Object.fromEntries(Object.entries(pr.bank||{}).filter(([,v])=>v)));
+  (pr.persons||[]).forEach((q,i)=>{const p=st.persons[i];if(!p)return;
+    for(const k of ['name','lastName','idNum'])if(q[k])p[k]=q[k];
+    if(q.gender&&q.gender!==p.gender){p.gender=q.gender;p.side=q.gender==='f'?'mother':'father';}});
+  return st;}
+function splitFullName(st){ // earlier versions had one name field: "תמיר כספי" -> first + last
+  (st.persons||[]).forEach(p=>{if(!p.lastName&&p.lastName!==''&&/\s/.test((p.name||'').trim())){const w=p.name.trim().split(/\s+/);p.name=w.shift();p.lastName=w.join(' ');}});return st;}
+let PROFILE=(()=>{try{const r=localStorage.getItem(PKEY);return r?JSON.parse(r):null;}catch(e){return null;}})();
+let S=splitFullName(load());
+if(PROFILE)applyProfile(S,PROFILE);else PROFILE=Object.assign(profileOf(S),{updatedAt:0});
+let profileSig=JSON.stringify(profileOf(S));
+let saveT;function save(){S.updatedAt=Date.now();clearTimeout(saveT);saveT=setTimeout(()=>{try{localStorage.setItem(LKEY(S.year),JSON.stringify(serial()));localStorage.setItem(MKEY,JSON.stringify({year:S.year,step:S.step,updatedAt:S.updatedAt}));}catch(e){}pushRemote();saveProfile();},300);}
+function saveProfile(){ // runs with every save; writes only when names, IDs or bank changed
+  const now=profileOf(S),sig=JSON.stringify(now);if(sig===profileSig)return;profileSig=sig;
+  PROFILE=Object.assign(now,{updatedAt:Date.now()});
+  try{localStorage.setItem(PKEY,JSON.stringify(Object.assign(profileForStore(PROFILE),{updatedAt:PROFILE.updatedAt})));}catch(e){}
+  if(SYNC.db)profileDoc().set({profile:profileForStore(PROFILE),updatedAt:PROFILE.updatedAt,device:DEVICE}).catch(()=>setSync('error'));
+}
 
 const SYNC={db:null,uid:null,unsub:null,status:'connecting',pending:null,t:null};
 function setSync(st){SYNC.status=st;const el=document.getElementById('sync');if(!el)return;
@@ -348,13 +375,19 @@ function setSync(st){SYNC.status=st;const el=document.getElementById('sync');if(
   el.textContent=m[0];el.className='sync '+m[1];}
 const yearDoc=y=>SYNC.db.doc(`data/users/${SYNC.uid}/taxwiz-y${y}`);
 const metaDoc=()=>SYNC.db.doc(`data/users/${SYNC.uid}/taxwiz-meta`);
+const profileDoc=()=>SYNC.db.doc(`data/users/${SYNC.uid}/taxwiz-profile`);
+function takeProfile(d){ // a newer profile from another device
+  if(!d||!d.profile||!(d.updatedAt>(PROFILE?.updatedAt||0)))return false;
+  PROFILE=Object.assign(structuredClone(d.profile),{updatedAt:d.updatedAt});applyProfile(S,PROFILE);profileSig=JSON.stringify(profileOf(S));
+  try{localStorage.setItem(PKEY,JSON.stringify(Object.assign(profileForStore(PROFILE),{updatedAt:PROFILE.updatedAt})));}catch(e){}
+  return true;}
 function pushRemote(){
   if(!SYNC.db)return;clearTimeout(SYNC.t);setSync('saving');
   SYNC.t=setTimeout(async()=>{const at=S.updatedAt||Date.now();
     try{await yearDoc(S.year).set({state:serial(),updatedAt:at,device:DEVICE});await metaDoc().set({year:S.year,updatedAt:at,device:DEVICE});setSync('synced');}
     catch(e){setSync('error');}},700);
 }
-function adopt(d){const step=S.step;S=fixState(d.state);S.step=step;S.updatedAt=d.updatedAt;if(document.getElementById('review')?.open){if(!S.docs[RV]){RV=-1;document.getElementById('review').close();}else setTimeout(renderReview,0);}
+function adopt(d){const step=S.step,keep=profileOf(S);S=splitFullName(fixState(d.state));S.step=step;S.updatedAt=d.updatedAt;applyProfile(S,keep);applyProfile(S,PROFILE);if(document.getElementById('review')?.open){if(!S.docs[RV]){RV=-1;document.getElementById('review').close();}else setTimeout(renderReview,0);}
   try{localStorage.setItem(LKEY(S.year),JSON.stringify(serial()));}catch(e){}}
 function typing(){const a=document.activeElement;return a&&a.matches&&a.matches('input,textarea,select')&&(document.getElementById('main').contains(a)||document.getElementById('review').contains(a));}
 function subscribe(y){
@@ -366,13 +399,14 @@ function subscribe(y){
     adopt(d);render();setSync('synced');
   },()=>setSync('error'));
 }
-document.addEventListener('focusout',()=>setTimeout(()=>{if(SYNC.pending&&!typing()){const d=SYNC.pending;SYNC.pending=null;if(d.updatedAt>(S.updatedAt||0)){adopt(d);render();}}},0));
+document.addEventListener('focusout',()=>setTimeout(()=>{if(SYNC.pendingProfile&&!typing()){const d=SYNC.pendingProfile;SYNC.pendingProfile=null;if(takeProfile(d))render();}
+  if(SYNC.pending&&!typing()){const d=SYNC.pending;SYNC.pending=null;if(d.updatedAt>(S.updatedAt||0)){adopt(d);render();}}},0));
 async function changeYear(y){
   if(y===S.year)return;clearTimeout(saveT);
   try{localStorage.setItem(LKEY(S.year),JSON.stringify(serial()));}catch(e){}
   const old=S;let next=readLocal(y);
   if(SYNC.db){try{const snap=await yearDoc(y).get();if(snap.exists&&snap.data().updatedAt>(next?.updatedAt||0))next=fixState(snap.data().state);}catch(e){}}
-  S=next||seedFrom(old,y);S.step=old.step;
+  S=splitFullName(next||seedFrom(old,y));S.step=old.step;applyProfile(S,profileOf(old));applyProfile(S,PROFILE);
   if(SYNC.db)subscribe(y);
   save();render();
 }
@@ -388,6 +422,10 @@ async function initSync(){
     const snap=await yearDoc(S.year).get();
     if(snap.exists&&snap.data().updatedAt>(S.updatedAt||0))adopt(snap.data());
     else if(S.updatedAt)pushRemote();
+    try{const ps=await profileDoc().get();if(ps.exists&&!takeProfile(ps.data())&&(PROFILE.updatedAt||0)>(ps.data().updatedAt||0)){profileSig='';saveProfile();}
+        else if(!ps.exists){profileSig='';saveProfile();}}catch(e){}
+    profileDoc().onSnapshot(snap=>{if(!snap.exists||snap.metadata.hasPendingWrites)return;const d=snap.data();if(d.device===DEVICE)return;
+      if(typing()){SYNC.pendingProfile=d;return;}if(takeProfile(d)){render();}},()=>{});
     subscribe(S.year);setSync(SYNC.status==='saving'?'saving':'synced');render();
   }catch(e){setSync('error');}
 }
@@ -457,7 +495,7 @@ function docsOf(i){return S.docs.filter(d=>d.status!=='reading'&&!needsReview(d)
 function aggregate(i){
   const a={salary:0,withheld:0,btlGross:0,btlTax:0,pensionEmp:0,insured:0,lifeIns:0,keren:0,months:0,n106:0,donDocs:0,pensionDocs:0,lifeDocs:0,capital:0,capitalTax:0,havraa:0,docs106:[]};
   for(const d of docsOf(i)){const f=d.fields||{};
-    if(d.type==='form106'){a.n106++;a.salary+=n(f.salary);a.withheld+=n(f.withheld);a.pensionEmp+=n(f.pensionEmp);a.insured+=n(f.insured);a.lifeIns+=n(f.lifeIns);a.keren+=n(f.keren);a.months+=n(f.months);a.havraa+=n(f.havraa);a.docs106.push(d);}
+    if(d.type==='form106'){a.n106++;a.salary+=n(f.salary);a.withheld+=n(f.withheld);a.pensionEmp+=n(f.pensionEmp);a.insured+=n(f.insured);a.lifeIns+=n(f.lifeIns);a.keren+=n(f.keren);a.pensionEr=(a.pensionEr||0)+n(f.pensionEr);a.months+=n(f.months);a.havraa+=n(f.havraa);a.docs106.push(d);}
     else if(d.type==='btl'){a.btlGross+=n(f.btlGross);a.btlTax+=n(f.btlTax);}
     else if(d.type==='pension'){a.pensionDocs+=n(f.pensionSelf);a.lifeDocs+=n(f.lifeIns);}
     else if(d.type==='donation'){a.donDocs+=n(f.donation);}
@@ -465,9 +503,28 @@ function aggregate(i){
   }
   return a;
 }
+const BIZ0={on:false,revenue:'',expenses:'',small:false,btlPaid:'',btlBenefits:'',pensionSelf:'',keren:'',disability:'',withheldInv:'',advances:''};
+const bizOf=p=>Object.assign({},BIZ0,p.biz||{});
+const selfCeil=Y=>Math.round(TAX.pensionCap[Y]/.07*2); // הכנסה מזכה לעצמאי (עמית מוטב) = פעמיים תקרת ההכנסה המזכה
+function bizCalc(p,Y){
+  const b=bizOf(p);if(!b.on)return null;
+  const rev=n(b.revenue),exp=b.small?rev*.3:n(b.expenses);
+  const btlDed=n(b.btlPaid)*.52;                       // ס׳ 47א: 52% מדמי הביטוח הלאומי של עצמאי
+  const profit=Math.max(0,rev-exp-btlDed);              // שדה 150/170, לפני הניכויים האישיים של חלק יב
+  const kCeil=TAX.kerenSelfCeil[Y]||293397;
+  const kerenDed=Math.min(n(b.keren),Math.min(profit,kCeil)*.045);   // ס׳ 17(5א)
+  const Q=Math.min(profit,selfCeil(Y));
+  const disDed=Math.min(n(b.disability),Q*.035);
+  const crPct=n(b.disability)>0?.05:.055;
+  const dep=n(b.pensionSelf),penCreditBase=Math.min(dep,Q*crPct),penDed=Math.min(Math.max(0,dep-penCreditBase),Q*.11);
+  const taxable=Math.max(0,profit-kerenDed-disDed-penDed);
+  return{b,rev,exp,btlDed,profit,kerenDed,disDed,penDed,penCreditBase,penCredit:penCreditBase*.35,taxable,
+    benefits:n(b.btlBenefits),withheldInv:n(b.withheldInv),advances:n(b.advances),Q,kCeil};
+}
 function computePerson(i){
   const p=S.persons[i],Y=S.year,a=aggregate(i);
-  const income=a.salary+a.btlGross, withheld=a.withheld+a.btlTax;
+  const B=bizCalc(p,Y);
+  const income=a.salary+a.btlGross+(B?B.taxable+B.benefits:0), withheld=a.withheld+a.btlTax+(B?B.withheldInv:0), advances=B?B.advances:0;
   const lines=[];
   let gross=bracketTax(income,Y);
   const sur=income>TAX.surtax[Y]?(income-TAX.surtax[Y])*.03:0;gross+=sur;
@@ -503,10 +560,11 @@ function computePerson(i){
   else if(don>0)donNote=`סך התרומות (${nf.format(don)} ₪) אינו עולה על המינימום לשנת ${Y} (${TAX.donMin[Y]} ₪).`;
   // yishuv
   let yCredit=0;if(p.yishuv.on&&n(p.yishuv.rate)>0&&n(p.yishuv.ceiling)>0)yCredit=Math.min(income,n(p.yishuv.ceiling))*n(p.yishuv.rate)/100;
-  const credits=pointsVal+pensionCredit+lifeCredit+donCredit+yCredit;
+  const bizCredit=B?B.penCredit:0;
+  const credits=pointsVal+pensionCredit+lifeCredit+donCredit+yCredit+bizCredit;
   const due=Math.max(0,gross-credits);
-  const refund=withheld-due;
-  return {i,a,income,withheld,gross,sur,P,points,pointsVal,pensionCredit,pensionBase,lifeCredit,don,donCredit,donNote,yCredit,credits,due,refund,lo:refund-Math.abs(refund)*.1,hi:Math.min(withheld,refund+Math.abs(refund)*.1)};
+  const refund=withheld+advances-due;
+  return {i,a,B,advances,bizCredit,income,withheld,gross,sur,P,points,pointsVal,pensionCredit,pensionBase,lifeCredit,don,donCredit,donNote,yCredit,credits,due,refund,lo:refund-Math.abs(refund)*.1,hi:Math.min(withheld+advances,refund+Math.abs(refund)*.1)};
 }
 function computeAll(){const r=persons().map(computePerson);const tot=r.reduce((s,x)=>s+x.refund,0);return{r,tot,lo:r.reduce((s,x)=>s+x.lo,0),hi:r.reduce((s,x)=>s+x.hi,0)};}
 
@@ -530,6 +588,7 @@ function triggers(R){
     if(p.ev.kerenEarly)t.push({k:'keren',txt:`משיכה מוקדמת מקרן השתלמות${who}`,docs:['אישור משיכה מהקרן עם המס שנוכה']});
     if(p.ev.disability)t.push({k:'dis',txt:`פטור נכות לפי ס׳ 9(5) — נדרשת בדיקה נפרדת${who}`,docs:['פרוטוקול ועדה רפואית','טופס בקשה לפטור']});
     if(p.ev.shift)t.push({k:'shift',txt:`זיכוי משמרות במפעל תעשייתי (ס׳ 10)${who}`,docs:['אישור המעסיק על שכר משמרת ב׳/ג׳']});
+    if(x.B)t.push({k:'biz',txt:`הכנסה מעסק או משלח יד${who}`,docs:['נספח א׳ (טופס 1320) לכל עסק: רווח והפסד','אישורי ניכוי במקור מלקוחות (טופס 857)','אישור שנתי על תשלומי ביטוח לאומי כעצמאי','אישורים שנתיים על הפקדות לפנסיה, לקרן השתלמות ולאובדן כושר עבודה','דף חשבון מקדמות מהאזור האישי']});
     if(p.ev.institution)t.push({k:'inst',txt:`החזקת קרוב במוסד (ס׳ 44)${who}`,docs:['טופס 116א','קבלות המוסד']});
   }
   return t;
@@ -539,7 +598,9 @@ function lifeHas(x,p){return x.lifeCredit>0;}
 /* filing-obligation screen */
 function obligations(R){
   const out=[],s=S.screen,Y=S.year;
-  if(s.selfEmployed)out.push('הכנסה מעסק או משלח יד — נדרש דוח שנתי מלא (טופס 1301) ולא בקשת החזר (135).');
+  const anyBiz=persons().some(i=>bizOf(S.persons[i]).on);
+  if(anyBiz)out.push('הכנסה מעסק או משלח יד — חובה להגיש דוח שנתי מלא (טופס 1301) עם נספח א׳ לכל עסק, ולא בקשת החזר (135).');
+  else if(s.selfEmployed)out.push('סימנתם הכנסה כעצמאי, אבל עוד לא הוזנו נתוני העסק (שלב 2). בכל מקרה נדרש טופס 1301.');
   if(s.foreign)out.push('הכנסות או נכסים בחו״ל — בדרך כלל מחייב טופס 1301 עם נספח 1327.');
   if(s.rent)out.push('הכנסה משכירות שאינה במסלול הפטור או ה־10% בלבד — דווחו בטופס 1301.');
   if(s.capital)out.push('רווחי הון שלא נוכה מהם מס מלא במקור, או קיזוז הפסדים — דווחו בטופס 1301 עם נספחים 1322/1325.');
@@ -624,11 +685,11 @@ async function parseFile(doc,file){
     const maxImg=limits?.images?.maxCount||0;
     if(file.type==='application/pdf'||/\.pdf$/i.test(file.name)){
       if(!window.pdfjsLib)throw{code:'nopdf'};
-      let previews;({text,imgs,previews}=await pdfToTextAndImages(file,maxImg));PREVIEW.set(doc.id,previews);
+      let previews;({text,imgs,previews}=await pdfToTextAndImages(file,maxImg||3));PREVIEW.set(doc.id,previews);
     }else if(file.type.startsWith('image/')){imgs=[file];PREVIEW.set(doc.id,[URL.createObjectURL(file)]);}
     else throw{code:'type'};
     RAW.set(doc.id,text);
-    if(!sample){localGuess(doc,text);doc.status='manual';doc.err=(doc.allFields&&doc.allFields.length)?'פוענח מקומית לפי קודי השדות שבטקסט הקובץ. השוו כל שדה מול המסמך. לפענוח מדויק יותר, הגדירו מפתח API בהגדרות.':'לא נמצאו קודי שדות בטקסט הקובץ. מלאו ידנית, או הגדירו מפתח API לפענוח אוטומטי.';return;}
+    if(!sample){text=await maybeOcr(doc,text,imgs);localGuess(doc,text);if(doc.ocr){doc.status='manual';doc.err=(doc.allFields&&doc.allFields.length)?'זוהה מצילום במכשיר שלך (OCR). בצילומים יש יותר טעויות, אז השוו כל שדה מול המסמך.':'לא זוהו קודי שדות בצילום. מלאו את השדות ידנית, או נסו צילום ישר וחד יותר.';return;}doc.status='manual';doc.err=(doc.allFields&&doc.allFields.length)?'פוענח מקומית לפי קודי השדות שבטקסט הקובץ. השוו כל שדה מול המסמך. לפענוח מדויק יותר, הגדירו מפתח API בהגדרות.':'לא נמצאו קודי שדות בטקסט הקובץ. מלאו ידנית, או הגדירו מפתח API לפענוח אוטומטי.';return;}
     if(!text.trim()&&!imgs.length)throw{code:'empty'};
     if(imgs.length&&!limits?.images){localGuess(doc,text);doc.status='manual';doc.err='זה מסמך סרוק. לפענוח שלו נדרש מפתח API בהגדרות, או מלאו ידנית.';return;}
     const opts={modelTier:'default'};
@@ -640,22 +701,29 @@ async function parseFile(doc,file){
     doc.err={bad_key:'מפתח ה־API נדחה. בדקו אותו בהגדרות.',bad_model:'שם המודל בהגדרות לא נמצא.',not_granted:'לא הוגדר מפתח API. הגדירו אותו בהגדרות, או מלאו ידנית.',rate_limited:'יותר מדי בקשות כרגע. נסו שוב בעוד דקה.',invalid_json:'התשובה לא התקבלה במבנה תקין. לחצו "פענח שוב".',nopdf:'רכיב קריאת ה־PDF לא נטען. רעננו את הדף.',type:'סוג קובץ לא נתמך. העלו PDF או תמונה.',empty:'לא נמצא טקסט או תמונה בקובץ.',image_rejected:'התמונה לא התקבלה (גודל או פורמט). נסו קובץ אחר.'}[e?.code]||'הפענוח נכשל. אפשר לנסות שוב או למלא ידנית.';
   }
 }
-function localGuess(doc,text){ // offline: collect every 3-digit form code on a line with the amount printed next to it
+const KW_MAP=[[/מבוטחת/,'insured'],[/השתלמות/,'keren'],[/(מעביד|מעסיק)[^\n]*(קצבה|פנסיה|גמל)|(קצבה|פנסיה|גמל)[^\n]*(מעביד|מעסיק)/,'pensionEr'],
+  [/(עובד|עמית)[^\n]*(קצבה|פנסיה|גמל)|(קצבה|פנסיה|גמל)[^\n]*(עובד|עמית)/,'pensionEmp'],[/ביטוח חיים/,'lifeIns'],[/הבראה/,'havraa'],[/מס הכנסה|שנוכה/,'withheld'],[/משכורת|חייבת|שכר עבודה/,'salary']];
+function kwMap(label){const t=[label,label.split(' ').map(w=>w.split('').reverse().join('')).reverse().join(' '),label.split('').reverse().join('')];
+  for(const [re,k] of KW_MAP)if(t.some(x=>re.test(x)))return k;return '';}
+function localGuess(doc,text){ // offline: every 3-digit form code on a line with its amount; labels help when a scan misreads the code
   doc.type=doc.type||'form106';doc.fields=doc.fields||{};doc.evidence={};
-  const rows=[],seen=new Set();
+  const rows=[],seen=new Set(),usedKw=new Set();
   for(const line of String(text||'').split('\n')){
     const Lx=line.replace(/\s+/g,' ').trim();if(!Lx)continue;
-    const codes=[...Lx.matchAll(/(?<![\d,.])([0-2]\d{2})(?:\s*\/\s*([0-2]\d{2}))?(?![\d,.])/g)];
-    const nums=[...Lx.matchAll(/(?<![\d,.])(\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d{4,8}(?:\.\d+)?)(?![\d,])/g)].map(m=>m[1])
-      .filter(x=>!(/^(19|20)\d{2}$/.test(x)));
-    if(!codes.length||!nums.length)continue;
-    const label=Lx.replace(/[\d,.\/()\-:]+/g,' ').replace(/\s+/g,' ').trim().slice(0,60);
-    for(const c of codes){const code=c[1];if(seen.has(code))continue;
-      const val=nums.map(n).filter(v=>v>0&&String(v)!==code).pop();if(val===undefined)continue;seen.add(code);
-      rows.push({code,label:label||('שדה '+code),value:val,orig:val,map:autoMap(doc.type,code,label)});}
+    const codes=[...Lx.matchAll(/(?<![\d,.])([0-2]\d{2})(?:\s*\/\s*([0-2]\d{2}))?(?![\d,.])/g)].map(m=>m[1]);
+    const nums=[...Lx.matchAll(/(?<![\d,.])(\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d{4,8}(?:\.\d+)?)(?![\d,])/g)].map(m=>m[1]).filter(x=>!(/^(19|20)\d{2}$/.test(x)));
+    if(!nums.length)continue;
+    const label=Lx.replace(/[\d,.\/()\-:₪]+/g,' ').replace(/\s+/g,' ').trim().slice(0,60);
+    const kw=label?kwMap(label):'';
+    const code=codes.find(c=>!seen.has(c))||'';
+    const val=nums.map(n).filter(v=>v>0&&String(v)!==code).pop();if(val===undefined)continue;
+    let map=code?autoMap(doc.type,code,label):'';
+    if(kw&&(doc.ocr||!map)&&!usedKw.has(kw))map=kw;   // in a scan, trust the printed label over a possibly misread code
+    if(!code&&!map)continue;
+    if(code)seen.add(code);if(map)usedKw.add(map);
+    rows.push({code,label:label||('שדה '+code),value:val,orig:val,map});
   }
   doc.allFields=rows;doc.fields={};syncFromAll(doc,true);doc.orig={...doc.fields};doc.checked={};doc.verified=false;doc.fconf={};
-  if(!doc.fields.salary&&!doc.fields.withheld&&rows.length===0)doc.type='form106';
 }
 function applyExtraction(doc,j){
   if(!j||typeof j!=='object'){doc.status='error';doc.err='לא התקבלו נתונים.';return;}
@@ -695,7 +763,7 @@ function renderRail(){
   $('#rail').innerHTML=STEPS.map((t,i)=>`<li><button data-go="${i}" class="${i<S.step?'done':''}" ${i===S.step?'aria-current="step"':''}><span class="n">${i+1}</span>${t}</button></li>`).join('');
   $('#yearPill').textContent='שנת מס '+S.year;
 }
-function render(){let mig=false;S.docs.forEach(d=>{if(d.allFields&&!d._mig2){migrateDoc(d);mig=true;}});if(mig)save();renderRail();$('#main').innerHTML=[stepYear,stepDocs,stepPoints,stepCredits,stepResult][S.step]();renderLedger();}
+function render(){let mig=false;S.docs.forEach(d=>{if(d.allFields&&!d._mig3){migrateDoc(d);mig=true;}});if(mig)save();renderRail();$('#main').innerHTML=[stepYear,stepDocs,stepPoints,stepCredits,stepResult][S.step]();renderLedger();}
 
 /* ---- field widgets ---- */
 const numF=(path,label,hint='')=>`<label class="f">${label}${hint?`<small>${hint}</small>`:''}<input type="number" inputmode="decimal" min="0" data-path="${path}" value="${esc(getPath(S,path)??'')}"></label>`;
@@ -724,11 +792,21 @@ function stepYear(){
       </div></label>
   </div>${warn}</div>
 
-  <div class="block"><h3>מי ממלא?</h3><p class="hint">השמות עוזרים לשייך טפסים לאדם הנכון באופן אוטומטי.</p>
-  ${persons().map(i=>`<div class="grid" style="margin-bottom:10px">
-     ${txtF(`persons.${i}.name`,`שם ${personLabel(i)}`)}
+  <div class="block"><h3>מי ממלא?</h3><p class="hint">הפרטים משותפים לכל שנות המס, משמשים לשיוך טפסים, ונכתבים על הטופס הרשמי.</p>
+  ${persons().map(i=>`${S.married?`<p style="margin:10px 0 4px;font-weight:700">${personLabel(i)}</p>`:''}<div class="grid" style="margin-bottom:10px">
+     ${txtF(`persons.${i}.name`,'שם פרטי')}
+     ${txtF(`persons.${i}.lastName`,'שם משפחה')}
+     <label class="f">מספר זהות<small>${idHint(S.persons[i].idNum)}</small><input type="text" inputmode="numeric" maxlength="9" autocomplete="off" data-path="persons.${i}.idNum" data-re value="${esc(S.persons[i].idNum||'')}"></label>
      ${sel(`persons.${i}.gender`,'מין',[['m','גבר'],['f','אישה']],'אישה זכאית ל־0.5 נקודת זיכוי נוספת.')}
-  </div>`).join('')}</div>
+  </div>`).join('')}
+  <h3 style="margin-top:14px">חשבון בנק להחזר</h3><p class="hint">על שם ${S.married?'בן הזוג הרשום':'המגיש/ה'} (שדות 277 ו־278 בטופס).</p>
+  <div class="grid">
+     <label class="f">מספר בנק<input type="text" inputmode="numeric" maxlength="3" data-path="bank.code" value="${esc(S.bank?.code||'')}"></label>
+     <label class="f">מספר סניף<input type="text" inputmode="numeric" maxlength="4" data-path="bank.branch" value="${esc(S.bank?.branch||'')}"></label>
+     <label class="f">מספר חשבון<input type="text" inputmode="numeric" maxlength="12" data-path="bank.account" value="${esc(S.bank?.account||'')}"></label>
+  </div>
+  ${chk('keepIds','לשמור את מספרי הזהות ופרטי הבנק','בלי הסימון, הם נשארים רק בחלון הנוכחי ונמחקים כשסוגרים אותו. עם הסימון, הם נשמרים בחשבון ומסתנכרנים לכל המכשירים ולכל שנות המס.')}
+  </div>
 
   <div class="block"><h3>האם אחד מאלה היה לכם בשנת ${Y}?</h3>
   <p class="hint">אם כן, ייתכן שאתם חייבים בדוח מלא (טופס 1301) ולא בבקשת החזר (טופס 135). נמשיך בכל מקרה, אבל נסמן את זה בתוצאה.</p>
@@ -763,7 +841,7 @@ function checks(d){
     if(has('months')&&(v('months')<1||v('months')>12))c.push({lv:'error',f:'months',msg:'חודשי עבודה צריכים להיות בין 1 ל־12.'});
     if(v('salary')&&v('months')&&v('salary')/v('months')<1500)c.push({lv:'warn',f:'salary',msg:`שכר חודשי ממוצע של ${nf.format(v('salary')/v('months'))} ₪ נמוך מאוד. ודאו שלא נקלט שדה אחר.`});
     if(v('salary')&&v('pensionEmp')>v('salary')*.1)c.push({lv:'warn',f:'pensionEmp',msg:'הפקדת העובד לפנסיה גבוהה מ־10% מהשכר. ודאו שלא נכללה גם הפקדת המעסיק.'});
-    if(v('keren')&&v('salary')&&v('keren')>v('salary')*.05)c.push({lv:'warn',f:'keren',msg:'הפקדת העובד לקרן השתלמות גבוהה מ־5% מהשכר. ודאו שלא נכללה גם הפקדת המעסיק.'});
+    if(v('keren')&&v('salary')&&v('keren')>v('salary')*1.01)c.push({lv:'warn',f:'keren',msg:'המשכורת שבשלה הופרש לקרן השתלמות (218/219) גבוהה מהמשכורת החייבת. בדקו את השדה.'});
     if(v('havraa')&&Y!==2024&&Y!==2025)c.push({lv:'warn',f:'havraa',msg:'שדה 011 / 012 קיים רק בשנים 2024–2025.'});
     if(v('havraa')&&(v('havraa')<200||v('havraa')>480))c.push({lv:'warn',f:'havraa',msg:'הפחתת יום הבראה היא בדרך כלל בין 209 ל־471.4 ₪.'});
     if(v('salary')&&has('withheld')){const months=v('months')||12;const est=Math.max(0,bracketTax(v('salary')*12/months,Y)*months/12-2.25*TAX.point[Y]*months/12);
@@ -786,25 +864,25 @@ function checks(d){
   return c;
 }
 /* codes printed on Form 106 that feed the calculation (first code = registered spouse, second = spouse). Mapping stays editable in the review screen. */
-const CODE_MAP={form106:{'158':'salary','172':'salary','042':'withheld','218':'keren','219':'keren','011':'havraa','012':'havraa','244':'insured','245':'insured','045':'pensionEmp','086':'pensionEmp','036':'lifeIns','081':'lifeIns'}};
+const CODE_MAP={form106:{'248':'pensionEr','249':'pensionEr','158':'salary','172':'salary','042':'withheld','218':'keren','219':'keren','011':'havraa','012':'havraa','244':'insured','245':'insured','045':'pensionEmp','086':'pensionEmp','036':'lifeIns','081':'lifeIns'}};
 const KNOWN_CODES=Object.keys(CODE_MAP.form106);
 function normCode(c){c=String(c||'').replace(/\D/g,'');if(!c)return '';if(c.length>3&&c.length%3===0)return c;return c.padStart(3,'0');}
 function autoMap(type,code,label){ // "158172" = the 158/172 pair printed as one; skip bases and employer-side amounts for deposit fields
   const m=CODE_MAP[type]||{};let k=m[code]||'';
   if(!k&&code.length>3)for(let i=0;i<code.length;i+=3){if(m[code.slice(i,i+3)]){k=m[code.slice(i,i+3)];break;}}
-  if(['keren','pensionEmp','lifeIns'].includes(k)&&/בסיס|מעביד|מעסיק/.test(label))return '';
+  if(['pensionEmp','lifeIns'].includes(k)&&/מעביד|מעסיק/.test(label))return '';
   return k;
 }
 function migrateDoc(d){ // repair records saved by earlier versions
-  if(!d.allFields||d._mig2)return;d._mig2=true;
+  if(!d.allFields||d._mig3)return;d._mig2=d._mig3=true; // v3: 218/219 is the keren salary base; 248/249 employer pension
   d.allFields.forEach(r=>{const c=normCode(r.code);if(c!==r.code)r.code=c;
     if(!r.map&&autoMap(d.type,r.code,r.label))r.map=autoMap(d.type,r.code,r.label);
-    else if(r.map&&r.map!==autoMap(d.type,r.code,r.label)&&['keren','pensionEmp','lifeIns'].includes(r.map)&&/בסיס/.test(r.label))r.map='';});
+    else if(!r.map&&['218','219','248','249'].includes(r.code))r.map=autoMap(d.type,r.code,r.label);});
   syncFromAll(d);
 }
 function syncFromAll(d,initial){ // semantic fields = sum of the printed fields mapped to them
   if(!d.allFields)return;const keys=new Set(d.allFields.filter(r=>r.map).map(r=>r.map));
-  for(const k of d.derived||[])if(!keys.has(k)){if(d.orig&&d.orig[k]!==undefined&&d.orig[k]!==''&&k!=='keren')d.fields[k]=d.orig[k];else delete d.fields[k];}
+  for(const k of d.derived||[])if(!keys.has(k)){if(d.orig&&d.orig[k]!==undefined&&d.orig[k]!=='')d.fields[k]=d.orig[k];else delete d.fields[k];}
   d.evidence=d.evidence||{};
   for(const k of keys){const rows=d.allFields.filter(r=>r.map===k);d.fields[k]=rows.reduce((a,r)=>a+n(r.value),0);
     d.evidence[k]=rows.map(r=>`${r.code?r.code+' ':''}${r.label} ${nf.format(n(r.value))}`).join(' + ').slice(0,120);}
@@ -901,7 +979,7 @@ function approveCurrent(){
 /* ---- step 2 ---- */
 const DOC_TYPES=[['form106','טופס 106 ממעסיק'],['btl','אישור שנתי מביטוח לאומי'],['pension','אישור שנתי מקופה / ביטוח'],['donation','קבלה על תרומה (ס׳ 46)'],['form867','טופס 867 מבנק / בית השקעות'],['form161','טופס 161 (עזיבה)'],['other','אחר']];
 const FIELDS={
-  form106:[['salary','משכורת חייבת','שדה 158 / 172'],['withheld','מס הכנסה שנוכה','שדה 042'],['months','חודשי עבודה',''],['pensionEmp','הפקדות עובד לפנסיה','ניכוי מהשכר'],['insured','משכורת מבוטחת',''],['lifeIns','ביטוח חיים (עובד)',''],['keren','הפקדות עובד לקרן השתלמות','שדה 218 / 219'],['havraa','הפחתת יום הבראה','שדה 011 / 012, לידיעה בלבד']],
+  form106:[['salary','משכורת חייבת','שדה 158 / 172'],['withheld','מס הכנסה שנוכה','שדה 042'],['months','חודשי עבודה',''],['pensionEmp','הפקדות עובד לפנסיה','ניכוי מהשכר'],['insured','משכורת מבוטחת',''],['lifeIns','ביטוח חיים (עובד)',''],['keren','משכורת שבשלה שילם המעביד לקרן השתלמות','שדה 218 / 219'],['pensionEr','הפקדות המעביד לקופת גמל לקצבה','שדה 248 / 249'],['havraa','הפחתת יום הבראה','שדה 011 / 012, לידיעה בלבד']],
   btl:[['btlGross','סכום ברוטו ששולם',''],['btlTax','מס שנוכה בביטוח לאומי','']],
   pension:[['pensionSelf','הפקדה עצמית לפנסיה','מחוץ לתלוש'],['lifeIns','פרמיות ביטוח חיים','']],
   donation:[['donation','סכום התרומה','']],
@@ -966,7 +1044,29 @@ function stepDocs(){
     ${chk(`persons.${i}.ev.bonus`,'בונוס או משכורת 13 בחודש עם שכר גבוה')}
     ${chk(`persons.${i}.ev.kerenEarly`,'משיכה מקרן השתלמות לפני 6 שנים')}`).join('')}
   </div>
+  ${bizBlock()}
   ${nav()}`;
+}
+
+function bizBlock(){
+  const Y=S.year;
+  return `<div class="block"><h3>הכנסה כעצמאי</h3><p class="hint">לבעלי עסק או משלח יד (עוסק פטור או מורשה). הכנסה כזו מחייבת דוח שנתי מלא (1301) עם נספח א׳.</p>
+  ${persons().map(i=>{const p=S.persons[i];p.biz=bizOf(p);const b=p.biz,B=bizCalc(p,Y);return `${S.married?`<p style="margin:12px 0 0;font-weight:700">${esc(p.name||personLabel(i))}</p>`:''}
+    ${chk(`persons.${i}.biz.on`,'הייתה לי הכנסה מעסק או משלח יד בשנה הזו')}
+    ${b.on?`<div class="grid" style="margin-top:6px">
+      ${numF(`persons.${i}.biz.revenue`,'מחזור הכנסות, בלי מע״מ','שדה 238 / 239')}
+      ${b.small?'':numF(`persons.${i}.biz.expenses`,'הוצאות מוכרות','לפי נספח א׳ ורווח והפסד')}
+      ${numF(`persons.${i}.biz.btlPaid`,'דמי ביטוח לאומי ששילמתי כעצמאי','בלי מס בריאות. 52% מוכרים כהוצאה (ס׳ 47א)')}
+      ${numF(`persons.${i}.biz.pensionSelf`,'הפקדות לפנסיה כעצמאי',`זיכוי עד ${b.disability>0?'5%':'5.5%'} וניכוי עד 11% מהכנסה מזכה של עד ${nf.format(selfCeil(Y))} ₪`)}
+      ${numF(`persons.${i}.biz.keren`,'הפקדות לקרן השתלמות לעצמאים',`ניכוי עד 4.5% מההכנסה, עד הכנסה של ${nf.format(TAX.kerenSelfCeil[Y]||293397)} ₪${TAX.kerenSelfCeil[Y]?'':' (תקרת 2025, לאמת לשנה זו)'}`)}
+      ${numF(`persons.${i}.biz.disability`,'ביטוח אובדן כושר עבודה','ניכוי עד 3.5% מההכנסה המזכה')}
+      ${numF(`persons.${i}.biz.btlBenefits`,'תקבולים מביטוח לאומי כעצמאי','מילואים, דמי לידה, פגיעה. שדה 250 / 270')}
+      ${numF(`persons.${i}.biz.withheldInv`,'מס שנוכה במקור מחשבוניות','לפי אישורי ניכוי במקור. שדה 040')}
+      ${numF(`persons.${i}.biz.advances`,'מקדמות מס הכנסה ששולמו','לפי דף החשבון באזור האישי')}
+    </div>
+    ${chk(`persons.${i}.biz.small`,'עסק זעיר: ניכוי הוצאות קבוע של 30% מהמחזור','רק למי שנרשם כבעל עסק זעיר ועומד בתנאים. בדקו זכאות באתר רשות המסים.')}
+    ${B?`<div class="note info">רווח לפני ניכויים אישיים (150/170): <b>${money(B.profit)}</b>. אחרי ניכוי קרן השתלמות, פנסיה ואובדן כושר: <b>${money(B.taxable)}</b>. זיכוי פנסיה: <b>${money(B.penCredit)}</b>.</div>`:''}`:''}`;}).join('')}
+  </div>`;
 }
 
 /* ---- step 3 ---- */
@@ -1046,15 +1146,22 @@ function stepResult(){
     <tr><th>רכיב</th><th>סכום</th></tr>
     <tr><td>משכורת חייבת מכל המעסיקים (${x.a.n106} טפסי 106)</td><td class="n">${money(x.a.salary)}</td></tr>
     ${x.a.btlGross?`<tr><td>תשלומים מביטוח לאומי</td><td class="n">${money(x.a.btlGross)}</td></tr>`:''}
+    ${x.B?`<tr><td>עסק: מחזור ${money(x.B.rev)}, פחות הוצאות ${money(x.B.exp)}${x.B.btlDed?` ו־52% מביטוח לאומי ${money(x.B.btlDed)}`:''}</td><td class="n">${money(x.B.profit)}</td></tr>
+      ${x.B.kerenDed?`<tr><td>פחות: קרן השתלמות לעצמאים (ס׳ 17(5א))</td><td class="n">−${money(x.B.kerenDed)}</td></tr>`:''}
+      ${x.B.penDed?`<tr><td>פחות: ניכוי פנסיה כעצמאי (ס׳ 47)</td><td class="n">−${money(x.B.penDed)}</td></tr>`:''}
+      ${x.B.disDed?`<tr><td>פחות: ביטוח אובדן כושר עבודה</td><td class="n">−${money(x.B.disDed)}</td></tr>`:''}
+      ${x.B.benefits?`<tr><td>תקבולים מביטוח לאומי כעצמאי</td><td class="n">${money(x.B.benefits)}</td></tr>`:''}`:''}
     <tr><td><b>הכנסה חייבת</b></td><td class="n"><b>${money(x.income)}</b></td></tr>
     <tr><td>מס לפי מדרגות ${Y}${x.sur?' כולל מס יסף':''}</td><td class="n">${money(x.gross)}</td></tr>
     ${x.P.map(([t,v])=>`<tr><td>פחות: ${t} — ${pts(v)} נק׳</td><td class="n">−${money(v*TAX.point[Y])}</td></tr>`).join('')}
     ${x.pensionCredit?`<tr><td>פחות: זיכוי 35% על הפקדות לפנסיה (ס׳ 45א)</td><td class="n">−${money(x.pensionCredit)}</td></tr>`:''}
     ${x.lifeCredit?`<tr><td>פחות: זיכוי 25% על ביטוח חיים</td><td class="n">−${money(x.lifeCredit)}</td></tr>`:''}
+    ${x.bizCredit?`<tr><td>פחות: זיכוי 35% על פנסיה כעצמאי (ס׳ 45א)</td><td class="n">−${money(x.bizCredit)}</td></tr>`:''}
     ${x.donCredit?`<tr><td>פחות: זיכוי 35% על תרומות (ס׳ 46)</td><td class="n">−${money(x.donCredit)}</td></tr>`:''}
     ${x.yCredit?`<tr><td>פחות: זיכוי יישוב מוטב (ס׳ 11)</td><td class="n">−${money(x.yCredit)}</td></tr>`:''}
     <tr class="sum"><td>מס שהיה צריך לשלם</td><td class="n">${money(x.due)}</td></tr>
-    <tr><td>מס שנוכה בפועל (שדה 042 ${x.a.btlTax?'+ ביטוח לאומי':''})</td><td class="n">${money(x.withheld)}</td></tr>
+    <tr><td>מס שנוכה במקור (042${x.a.btlTax?', ביטוח לאומי':''}${x.B&&x.B.withheldInv?', 040':''})</td><td class="n">${money(x.withheld)}</td></tr>
+    ${x.advances?`<tr><td>מקדמות ששולמו</td><td class="n">${money(x.advances)}</td></tr>`:''}
     <tr class="sum"><td>${x.refund>=0?'החזר משוער':'חוב משוער'}</td><td class="n" style="color:${x.refund>=0?'var(--good)':'var(--bad)'}">${money(Math.abs(x.refund))}</td></tr>
     </table></div>${x.donNote?`<div class="note warn">${x.donNote}</div>`:''}${x.a.havraa?`<div class="note info">שדה 011/012 (הפחתת יום הבראה) מופיע לידיעה בלבד. הוא כבר נוכה מהשכר ואינו ניכוי או זיכוי.</div>`:''}${x.a.capital?`<div class="note info">הכנסות הון מטופס 867 (${nf.format(x.a.capital)} ₪) ממוסות בשיעור נפרד ואינן בחישוב. אם נוכה מהן מס מלא, בדרך כלל אין חובה לדווח, אבל דוח מלא מאפשר לקזז הפסדים.</div>`:''}</div>`).join('');
 
@@ -1069,6 +1176,7 @@ function stepResult(){
   <div class="block"><h3>מה זיהינו</h3>${tr.length?`<ul class="plain">${tr.map(t=>`<li>${t.txt}</li>`).join('')}</ul>`:'<p class="hint" style="margin:0">לא זוהו סיבות מיוחדות להחזר מעבר לחישוב הבסיסי.</p>'}</div>
   <div class="block"><h3>מסמכים לצרף</h3><ul class="plain">${docs.map(d=>`<li>${d}</li>`).join('')}</ul></div>
   ${interestBlock(R)}
+  ${formsBlock(R)}
   <div class="block"><h3>איך מגישים</h3>
     <ul class="plain">
       ${ob.length?'<li>יש סימנים לחובת דוח מלא. מגישים טופס 1301 בשירות המקוון של רשות המסים, או דרך מייצג.</li>':`<li><b>מקוון:</b> מערכת פתיחת תיק להחזר מס, עם הזדהות וצירוף סריקות. נפתח תיק החזר בלבד, לא תיק פעיל.</li>
@@ -1114,7 +1222,7 @@ function renderLedger(){
   const R=computeAll(),Y=S.year;
   const rows=R.r.map(x=>`${S.married?`<tr><td class="who" colspan="2">${esc(S.persons[x.i].name||personLabel(x.i))}</td></tr>`:''}
     <tr><td>הכנסה חייבת</td><td>${money(x.income)}</td></tr>
-    <tr><td>מס שנוכה</td><td>${money(x.withheld)}</td></tr>
+    <tr><td>מס שנוכה${x.advances?' ומקדמות':''}</td><td>${money(x.withheld+x.advances)}</td></tr>
     <tr><td>מס לפי מדרגות</td><td>${money(x.gross)}</td></tr>
     <tr class="sub"><td>נקודות זיכוי (${pts(x.points)})</td><td>−${money(x.pointsVal)}</td></tr>
     ${x.credits-x.pointsVal>0?`<tr class="sub"><td>זיכויים אחרים</td><td>−${money(x.credits-x.pointsVal)}</td></tr>`:''}
@@ -1158,6 +1266,207 @@ ${question?'The user asks: '+question:'Analyse the result: is it plausible, what
   finally{$('#aiStop')?.classList.add('hidden');}
 }
 
+/* ---- reporting forms: 135 / 1301 ---- */
+/* line numbers per form and tax year, taken from the official ITA forms 2020–2025 */
+const FORM_LINES={"135":{"2020":{"112":"26","135":"28","244":"31","248":"32","036":"44","045":"46","268":"47","132":"48","037":"49","kids":"35","026":"36","153":"38","023":"39","224":"42","181":"43","294":"53","042":"54","040":"56","yishuv":"52","150":"1","250":"2א","194":"2ב","158":"3"},"2021":{"112":"26","135":"28","244":"31","248":"32","036":"44","045":"46","268":"47","132":"48","037":"49","kids":"35","026":"36","153":"38","023":"39","224":"42","181":"43","294":"53","042":"54","040":"56","yishuv":"52","150":"1","250":"2א","194":"2ב","158":"3"},"2022":{"112":"26","135":"28","244":"31","248":"32","036":"44","045":"46","268":"47","132":"48","037":"49","kids":"35","026":"36","153":"38","023":"39","224":"42","181":"43","294":"53","042":"54","040":"56","yishuv":"52","150":"1","250":"2א","194":"2ב","158":"3"},"2023":{"112":"26","135":"28","244":"31","248":"32","036":"44","045":"46","268":"47","132":"48","037":"49","kids":"35","026":"36","153":"38","023":"39","224":"42","181":"43","294":"53","042":"54","040":"56","yishuv":"52","150":"1","250":"2א","194":"2ב","158":"3"},"2024":{"112":"26","135":"28","244":"31","248":"32","011":"33","036":"45","045":"47","268":"48","132":"49","037":"50","kids":"36","026":"37","153":"39","023":"40","224":"43","181":"44","294":"54","042":"55","040":"57","yishuv":"53","150":"1","250":"2א","194":"2ב","158":"3"},"2025":{"112":"25","135":"27","244":"30","248":"31","011":"32","036":"44","045":"46","268":"47","132":"48","037":"49","kids":"35","026":"36","153":"38","023":"39","224":"42","181":"43","294":"53","042":"54","040":"56","yishuv":"52","150":"1","250":"2א","194":"2ב","158":"3"}},"1301":{"2020":{"238":"35","112":"47","136":"49","218":"50","135":"51","244":"57","248":"58","kids":"62","026":"63","153":"65","023":"66","224":"69","181":"70","036":"71","045":"73","268":"74","132":"75","037":"76א","294":"80","042":"81","040":"83","yishuv":"79","150":"1","250":"2א","194":"2ב","158":"3"},"2021":{"238":"35","112":"47","136":"49","218":"50","135":"51","244":"57","248":"58","kids":"62","026":"63","153":"65","023":"66","224":"69","181":"70","036":"71","045":"73","268":"74","132":"75","037":"76א","294":"80","042":"81","040":"83","yishuv":"79","150":"1","250":"2א","194":"2ב","158":"3"},"2022":{"238":"35","112":"47","136":"49","218":"50","135":"51","244":"56","248":"57","kids":"61","026":"62","153":"64","023":"65","224":"68","181":"69","036":"70","045":"72","268":"73","132":"74","037":"75א","294":"79","042":"80","040":"82","yishuv":"78","150":"1","250":"2א","194":"2ב","158":"3"},"2023":{"238":"34","112":"46","136":"48","218":"49","135":"50","244":"55","248":"56","kids":"60","026":"61","153":"63","023":"64","224":"67","181":"68","036":"69","045":"71","268":"72","132":"73","037":"74א","294":"79","042":"80","040":"82","yishuv":"78","150":"1","250":"2א","194":"2ב","158":"3"},"2024":{"238":"34","112":"46","136":"48","218":"49","135":"50","244":"55","248":"56","011":"57","kids":"61","026":"62","153":"64","023":"65","224":"68","181":"69","036":"70","045":"72","268":"73","132":"74","037":"75א","294":"80","042":"81","040":"83","yishuv":"79","150":"1","250":"2א","194":"2ב","158":"3"},"2025":{"238":"36","112":"49","136":"51","218":"52","135":"53","244":"58","248":"59","011":"60","kids":"64","026":"65","153":"67","023":"68","224":"71","181":"72","036":"73","045":"75","268":"76","132":"77","037":"78א","294":"83","042":"84","040":"87","yishuv":"82","150":"1","250":"2א","194":"2ב","158":"3"}}};
+/* field positions on the official PDFs (points, origin bottom-left), extracted from the ITA forms */
+const FORM_POS={"135-2020":{"c":{"270":[0,118.9,371.3],"250":[0,221.1,371.3],"170":[0,119.0,391.4],"150":[0,221.8,391.4],"172":[0,119.0,332.7],"158":[0,221.8,332.7],"196":[0,119.8,352.1],"194":[0,222.6,352.1],"324":[1,101.9,454.1],"224":[1,182.3,454.1],"131":[1,59.9,527.1],"023":[1,104.2,527.1],"153":[1,54.8,544.5],"026":[1,52.9,593.8],"249":[1,312.5,547.9],"248":[1,395.9,547.9],"113":[1,312.8,663.4],"112":[1,396.2,663.4],"180":[1,312.5,625.4],"135":[1,395.9,625.4],"245":[1,312.5,567.0],"244":[1,395.9,567.0],"269":[1,313.8,471.3],"268":[1,396.5,471.3],"081":[1,313.8,528.0],"036":[1,396.4,528.0],"086":[1,314.0,490.2],"045":[1,396.2,490.2],"232":[1,313.0,452.5],"132":[1,395.4,452.5],"237":[1,313.0,434.5],"037":[1,396.5,434.5],"294":[1,127.1,332.7],"042":[1,126.2,313.4],"040":[1,126.0,274.1],"020":[1,52.9,798.3],"278":[0,88.5,440.0],"277":[0,208.5,440.0]},"k":{"260":[1,751.4,[[140.9,175.0],[106.8,140.9],[72.7,106.8],[38.6,72.7]]],"262":[1,738.9,[[140.9,175.0],[106.8,140.9],[72.7,106.8],[38.6,72.7]]],"190":[1,726.3,[[140.9,175.0],[106.8,140.9],[72.7,106.8],[38.6,72.7]]],"291":[1,713.2,[[140.9,175.0],[106.8,140.9],[72.7,106.8],[38.6,72.7]]],"022":[1,700.6,[[140.9,175.0],[106.8,140.9],[72.7,106.8],[38.6,72.7]]]},"x":{"refund":[0,287.5,738.8],"couple":[0,483.4,739.3],"married":[0,394.3,609.2]}},"135-2021":{"c":{"270":[0,118.9,371.3],"250":[0,221.1,371.3],"170":[0,119.0,391.4],"150":[0,221.8,391.4],"172":[0,119.0,332.7],"158":[0,221.8,332.7],"196":[0,119.8,352.1],"194":[0,222.6,352.1],"324":[1,101.9,454.1],"224":[1,182.3,454.1],"131":[1,59.9,527.1],"023":[1,104.2,527.1],"153":[1,54.8,544.5],"026":[1,52.9,593.8],"249":[1,312.5,547.9],"248":[1,395.9,547.9],"113":[1,312.8,663.4],"112":[1,396.2,663.4],"180":[1,312.5,625.4],"135":[1,395.9,625.4],"245":[1,312.5,567.0],"244":[1,395.9,567.0],"269":[1,313.8,471.3],"268":[1,396.5,471.3],"081":[1,313.8,528.0],"036":[1,396.4,528.0],"086":[1,314.0,490.2],"045":[1,396.2,490.2],"232":[1,313.0,452.5],"132":[1,395.4,452.5],"237":[1,313.0,434.5],"037":[1,396.5,434.5],"294":[1,127.1,332.7],"042":[1,126.2,313.4],"040":[1,126.0,274.1],"020":[1,52.9,798.3],"278":[0,88.5,440.0],"277":[0,208.5,440.0]},"k":{"260":[1,751.4,[[140.9,175.0],[106.8,140.9],[72.7,106.8],[38.6,72.7]]],"262":[1,738.9,[[140.9,175.0],[106.8,140.9],[72.7,106.8],[38.6,72.7]]],"190":[1,726.3,[[140.9,175.0],[106.8,140.9],[72.7,106.8],[38.6,72.7]]],"291":[1,713.2,[[140.9,175.0],[106.8,140.9],[72.7,106.8],[38.6,72.7]]],"022":[1,700.6,[[140.9,175.0],[106.8,140.9],[72.7,106.8],[38.6,72.7]]]},"x":{"refund":[0,287.5,738.8],"couple":[0,483.4,739.3],"married":[0,394.3,609.2]}},"135-2022":{"c":{"270":[0,118.9,371.3],"250":[0,221.1,371.3],"170":[0,119.0,391.4],"150":[0,221.8,391.4],"172":[0,119.0,332.7],"158":[0,221.8,332.7],"196":[0,119.8,352.1],"194":[0,222.6,352.1],"324":[1,101.9,454.1],"224":[1,182.3,454.1],"131":[1,59.9,527.1],"023":[1,104.2,527.1],"153":[1,54.8,544.5],"026":[1,52.9,593.8],"249":[1,312.5,547.9],"248":[1,395.9,547.9],"113":[1,312.8,663.4],"112":[1,396.2,663.4],"180":[1,312.5,625.4],"135":[1,395.9,625.4],"245":[1,312.5,567.0],"244":[1,395.9,567.0],"269":[1,313.8,471.3],"268":[1,396.5,471.3],"081":[1,313.8,528.0],"036":[1,396.4,528.0],"086":[1,314.0,490.2],"045":[1,396.2,490.2],"232":[1,313.0,452.5],"132":[1,395.4,452.5],"237":[1,313.0,434.5],"037":[1,396.5,434.5],"294":[1,127.1,332.7],"042":[1,126.2,313.4],"040":[1,126.0,274.1],"020":[1,52.9,798.3],"278":[0,88.5,440.0],"277":[0,208.5,440.0]},"k":{"260":[1,751.4,[[156.0,185.2],[126.8,156.0],[97.6,126.8],[68.4,97.6],[39.2,68.4]]],"262":[1,738.9,[[156.0,185.2],[126.8,156.0],[97.6,126.8],[68.4,97.6],[39.2,68.4]]],"190":[1,726.3,[[156.0,185.2],[126.8,156.0],[97.6,126.8],[68.4,97.6],[39.2,68.4]]],"291":[1,713.2,[[156.0,185.2],[126.8,156.0],[97.6,126.8],[68.4,97.6],[39.2,68.4]]],"022":[1,700.6,[[156.0,185.2],[126.8,156.0],[97.6,126.8],[68.4,97.6],[39.2,68.4]]]},"x":{"refund":[0,332.5,738.8],"couple":[0,491.4,739.3],"married":[0,401.3,609.2]}},"135-2023":{"c":{"270":[0,118.9,371.3],"250":[0,221.1,371.3],"170":[0,119.0,391.4],"150":[0,221.8,391.4],"172":[0,119.0,332.7],"158":[0,221.8,332.7],"196":[0,119.8,352.1],"194":[0,222.6,352.1],"324":[1,101.9,454.1],"224":[1,182.3,454.1],"131":[1,59.9,527.1],"023":[1,104.2,527.1],"153":[1,54.8,544.5],"026":[1,52.9,593.8],"249":[1,312.5,547.9],"248":[1,395.9,547.9],"113":[1,312.8,663.4],"112":[1,396.2,663.4],"180":[1,312.5,625.4],"135":[1,395.9,625.4],"245":[1,312.5,567.0],"244":[1,395.9,567.0],"269":[1,313.8,471.3],"268":[1,396.5,471.3],"081":[1,313.8,528.0],"036":[1,396.4,528.0],"086":[1,314.0,490.2],"045":[1,396.2,490.2],"232":[1,313.0,452.5],"132":[1,395.4,452.5],"237":[1,313.0,434.5],"037":[1,396.5,434.5],"294":[1,127.1,332.7],"042":[1,126.2,313.4],"040":[1,126.0,274.1],"020":[1,52.9,798.3],"278":[0,88.5,440.0],"277":[0,208.5,440.0]},"k":{"260":[1,751.4,[[156.0,185.2],[126.8,156.0],[97.6,126.8],[68.4,97.6],[39.2,68.4]]],"262":[1,738.9,[[156.0,185.2],[126.8,156.0],[97.6,126.8],[68.4,97.6],[39.2,68.4]]],"190":[1,726.3,[[156.0,185.2],[126.8,156.0],[97.6,126.8],[68.4,97.6],[39.2,68.4]]],"291":[1,713.2,[[156.0,185.2],[126.8,156.0],[97.6,126.8],[68.4,97.6],[39.2,68.4]]],"022":[1,700.6,[[156.0,185.2],[126.8,156.0],[97.6,126.8],[68.4,97.6],[39.2,68.4]]]},"x":{"refund":[0,332.5,738.8],"couple":[0,491.4,739.3],"married":[0,401.3,609.2]}},"135-2024":{"c":{"270":[0,118.9,371.3],"250":[0,221.1,371.3],"170":[0,119.0,391.4],"150":[0,221.8,391.4],"172":[0,119.0,332.7],"158":[0,221.8,332.7],"196":[0,119.8,352.1],"194":[0,222.6,352.1],"324":[1,101.9,454.1],"224":[1,182.3,454.1],"131":[1,59.9,527.1],"023":[1,104.2,527.1],"153":[1,54.8,544.5],"026":[1,52.9,593.8],"249":[1,312.5,559.5],"248":[1,395.9,559.5],"012":[1,312.5,540.6],"011":[1,395.9,540.6],"113":[1,312.8,670.1],"112":[1,396.2,670.1],"180":[1,312.5,633.7],"135":[1,395.9,633.7],"245":[1,312.5,577.8],"244":[1,395.9,577.8],"269":[1,313.8,467.2],"268":[1,396.6,467.2],"081":[1,313.8,521.4],"036":[1,396.4,521.4],"086":[1,314.0,485.3],"045":[1,396.2,485.3],"232":[1,313.0,449.1],"132":[1,395.4,449.1],"237":[1,313.0,431.9],"037":[1,396.6,431.9],"294":[1,127.1,332.7],"042":[1,126.2,313.4],"040":[1,126.0,274.1],"020":[1,52.9,798.3],"278":[0,88.5,440.0],"277":[0,208.5,440.0]},"k":{"260":[1,750.5,[[165.0,190.4],[139.6,165.0],[114.1,139.6],[88.7,114.1],[63.3,88.7],[37.9,63.3]]],"262":[1,737.8,[[165.0,190.4],[139.6,165.0],[114.1,139.6],[88.7,114.1],[63.3,88.7],[37.9,63.3]]],"190":[1,724.2,[[165.0,190.4],[139.6,165.0],[114.1,139.6],[88.7,114.1],[63.3,88.7],[37.9,63.3]]],"291":[1,710.8,[[165.0,190.4],[139.6,165.0],[114.1,139.6],[88.7,114.1],[63.3,88.7],[37.9,63.3]]],"022":[1,696.3,[[165.0,190.4],[139.6,165.0],[114.1,139.6],[88.7,114.1],[63.3,88.7],[37.9,63.3]]]},"x":{"refund":[0,332.5,738.8],"couple":[0,491.4,739.3],"married":[0,401.3,609.2]}},"135-2025":{"c":{"270":[0,118.9,371.3],"250":[0,221.1,371.3],"170":[0,119.0,391.4],"150":[0,221.8,391.4],"172":[0,119.0,332.7],"158":[0,221.8,332.7],"196":[0,119.8,352.1],"194":[0,222.6,352.1],"324":[1,101.9,454.1],"224":[1,182.3,454.1],"131":[1,59.9,527.1],"023":[1,104.2,527.1],"153":[1,54.8,544.5],"026":[1,52.9,593.8],"249":[1,312.5,559.5],"248":[1,395.9,559.5],"012":[1,312.5,540.6],"011":[1,395.9,540.6],"113":[1,312.8,670.1],"112":[1,396.2,670.1],"180":[1,312.5,633.7],"135":[1,395.9,633.7],"245":[1,312.5,577.8],"244":[1,395.9,577.8],"269":[1,313.8,467.2],"268":[1,396.6,467.2],"081":[1,313.8,521.4],"036":[1,396.4,521.4],"086":[1,314.0,485.3],"045":[1,396.2,485.3],"232":[1,313.0,449.1],"132":[1,395.4,449.1],"237":[1,313.0,431.9],"037":[1,396.6,431.9],"294":[1,127.1,332.7],"042":[1,126.2,313.4],"040":[1,126.0,274.1],"020":[1,52.9,798.3],"278":[0,88.5,440.0],"277":[0,208.5,440.0]},"k":{"260":[1,750.5,[[165.0,190.4],[139.6,165.0],[114.1,139.6],[88.7,114.1],[63.3,88.7],[37.9,63.3]]],"262":[1,737.8,[[165.0,190.4],[139.6,165.0],[114.1,139.6],[88.7,114.1],[63.3,88.7],[37.9,63.3]]],"190":[1,724.2,[[165.0,190.4],[139.6,165.0],[114.1,139.6],[88.7,114.1],[63.3,88.7],[37.9,63.3]]],"291":[1,710.8,[[165.0,190.4],[139.6,165.0],[114.1,139.6],[88.7,114.1],[63.3,88.7],[37.9,63.3]]],"022":[1,696.3,[[165.0,190.4],[139.6,165.0],[114.1,139.6],[88.7,114.1],[63.3,88.7],[37.9,63.3]]]},"x":{"refund":[0,332.5,738.8],"couple":[0,491.4,739.3],"married":[0,401.3,609.2]}},"1301-2020":{"c":{"170":[1,115.9,763.6],"150":[1,218.0,764.7],"270":[1,115.9,746.0],"250":[1,218.0,746.0],"196":[1,115.9,728.9],"194":[1,218.0,728.9],"172":[1,115.9,712.0],"158":[1,218.0,712.0],"324":[2,94.7,408.8],"224":[2,173.6,408.8],"131":[2,66.6,476.8],"023":[2,143.9,476.8],"153":[2,49.4,505.0],"026":[2,49.4,559.6],"245":[2,118.1,59.7],"244":[2,220.8,58.7],"113":[2,118.1,282.5],"112":[2,220.8,283.5],"137":[2,118.1,241.5],"136":[2,220.8,241.5],"219":[2,118.1,222.6],"218":[2,220.8,222.6],"180":[2,118.1,197.6],"135":[2,220.8,198.6],"040":[3,118.5,464.8],"042":[3,118.0,513.8],"294":[3,118.7,536.9],"237":[3,120.2,689.9],"037":[3,222.8,689.9],"232":[3,120.2,708.9],"132":[3,222.8,708.9],"269":[3,120.2,728.2],"268":[3,222.8,728.2],"086":[3,120.2,747.2],"045":[3,222.8,747.2],"081":[3,120.2,785.4],"036":[3,222.8,786.4],"020":[2,46.0,794.3],"239":[1,114.7,49.6],"238":[1,216.9,50.0],"249":[2,118.1,39.1],"248":[2,220.8,39.1],"277":[0,337.0,166.6],"278":[0,217.7,166.5]},"k":{"260":[2,730.9,[[166.0,212.1],[119.8,166.0],[73.7,119.8],[27.5,73.7]]],"262":[2,717.4,[[166.0,212.1],[119.8,166.0],[73.7,119.8],[27.5,73.7]]],"190":[2,702.8,[[166.0,212.1],[119.8,166.0],[73.7,119.8],[27.5,73.7]]],"291":[2,689.5,[[166.0,212.1],[119.8,166.0],[73.7,119.8],[27.5,73.7]]],"022":[2,673.0,[[166.0,212.1],[119.8,166.0],[73.7,119.8],[27.5,73.7]]]},"x":{"refund":[0,329.8,740.5],"couple":[0,501.8,740.5],"married":[0,501.1,392.9]}},"1301-2021":{"c":{"170":[1,115.9,763.6],"150":[1,218.0,764.7],"270":[1,115.9,746.0],"250":[1,218.0,746.0],"196":[1,115.9,728.9],"194":[1,218.0,728.9],"172":[1,115.9,712.0],"158":[1,218.0,712.0],"324":[2,94.7,408.8],"224":[2,173.6,408.8],"131":[2,66.6,476.8],"023":[2,143.9,476.8],"153":[2,49.4,505.0],"026":[2,49.4,559.6],"245":[2,118.1,59.7],"244":[2,220.8,58.7],"113":[2,118.1,282.5],"112":[2,220.8,283.5],"137":[2,118.1,241.5],"136":[2,220.8,241.5],"219":[2,118.1,222.6],"218":[2,220.8,222.6],"180":[2,118.1,197.6],"135":[2,220.8,198.6],"040":[3,118.5,464.8],"042":[3,118.0,513.8],"294":[3,118.7,536.9],"237":[3,120.2,689.9],"037":[3,222.8,689.9],"232":[3,120.2,708.9],"132":[3,222.8,708.9],"269":[3,120.2,728.2],"268":[3,222.8,728.2],"086":[3,120.2,747.2],"045":[3,222.8,747.2],"081":[3,120.2,785.4],"036":[3,222.8,786.4],"020":[2,46.0,794.3],"239":[1,114.7,49.6],"238":[1,216.9,50.0],"249":[2,118.1,39.1],"248":[2,220.8,39.1],"277":[0,337.0,173.7],"278":[0,217.7,173.5]},"k":{"260":[2,730.9,[[166.0,212.1],[119.8,166.0],[73.7,119.8],[27.5,73.7]]],"262":[2,717.4,[[166.0,212.1],[119.8,166.0],[73.7,119.8],[27.5,73.7]]],"190":[2,702.8,[[166.0,212.1],[119.8,166.0],[73.7,119.8],[27.5,73.7]]],"291":[2,689.5,[[166.0,212.1],[119.8,166.0],[73.7,119.8],[27.5,73.7]]],"022":[2,673.0,[[166.0,212.1],[119.8,166.0],[73.7,119.8],[27.5,73.7]]]},"x":{"refund":[0,329.8,741.4],"couple":[0,501.8,741.4],"married":[0,501.1,397.5]}},"1301-2022":{"c":{"170":[1,115.9,772.6],"150":[1,218.0,773.6],"270":[1,115.9,755.7],"250":[1,218.0,755.7],"196":[1,115.9,739.2],"194":[1,218.0,739.2],"172":[1,115.9,704.8],"158":[1,218.0,704.8],"324":[2,94.7,400.6],"224":[2,173.6,400.6],"131":[2,66.6,470.0],"023":[2,143.9,470.0],"153":[2,49.4,498.7],"026":[2,49.4,554.4],"137":[2,118.1,230.0],"136":[2,220.8,230.0],"219":[2,118.1,210.8],"218":[2,220.8,210.8],"180":[2,118.1,185.2],"135":[2,220.8,186.3],"113":[2,118.1,271.9],"112":[2,220.8,272.9],"040":[3,118.5,457.4],"042":[3,118.0,503.8],"294":[3,118.7,525.7],"237":[3,120.2,692.0],"037":[3,222.8,692.0],"232":[3,120.2,710.7],"132":[3,222.8,710.7],"269":[3,120.2,729.6],"268":[3,222.8,729.6],"086":[3,120.2,748.3],"045":[3,222.8,748.3],"081":[3,120.2,785.8],"036":[3,222.8,786.8],"020":[2,46.0,793.7],"245":[2,118.1,57.5],"244":[2,220.8,56.5],"239":[1,114.7,49.9],"238":[1,216.9,50.2],"249":[2,118.1,36.6],"248":[2,220.8,36.6],"277":[0,337.0,173.7],"278":[0,217.7,173.5]},"k":{"260":[2,729.1,[[175.4,212.1],[138.7,175.4],[102.0,138.7],[65.4,102.0],[28.7,65.4]]],"262":[2,715.4,[[175.4,212.1],[138.7,175.4],[102.0,138.7],[65.4,102.0],[28.7,65.4]]],"190":[2,700.5,[[175.4,212.1],[138.7,175.4],[102.0,138.7],[65.4,102.0],[28.7,65.4]]],"291":[2,686.9,[[175.4,212.1],[138.7,175.4],[102.0,138.7],[65.4,102.0],[28.7,65.4]]],"022":[2,670.1,[[175.4,212.1],[138.7,175.4],[102.0,138.7],[65.4,102.0],[28.7,65.4]]]},"x":{"refund":[0,329.8,741.4],"couple":[0,501.8,741.4],"married":[0,501.1,399.5]}},"1301-2023":{"c":{"170":[1,115.8,769.3],"150":[1,217.9,770.4],"270":[1,115.8,750.9],"250":[1,217.9,750.9],"196":[1,115.8,733.0],"194":[1,217.9,733.0],"172":[1,115.8,715.2],"158":[1,217.9,715.2],"324":[2,94.7,395.6],"224":[2,173.6,395.6],"131":[2,66.6,465.0],"023":[2,143.9,465.0],"153":[2,49.4,493.7],"026":[2,49.4,549.4],"137":[2,118.1,221.0],"136":[2,220.8,221.0],"219":[2,118.1,201.8],"218":[2,220.8,201.8],"180":[2,118.1,176.2],"135":[2,220.8,177.3],"113":[2,118.1,262.9],"112":[2,220.8,263.9],"040":[3,118.5,454.4],"042":[3,118.0,495.8],"294":[3,118.7,516.7],"237":[3,120.2,696.3],"037":[3,222.8,696.3],"232":[3,120.2,714.2],"132":[3,222.8,714.2],"269":[3,120.2,732.4],"268":[3,222.8,732.4],"086":[3,120.2,750.3],"045":[3,222.8,750.3],"081":[3,120.2,786.4],"036":[3,222.8,787.3],"020":[2,46.0,793.7],"245":[2,118.1,57.5],"244":[2,220.8,56.5],"239":[1,114.9,52.2],"238":[1,217.1,52.6],"249":[2,118.1,36.6],"248":[2,220.8,36.6],"277":[0,337.0,173.7],"278":[0,217.7,173.5]},"k":{"260":[2,729.1,[[175.4,212.1],[138.7,175.4],[102.0,138.7],[65.4,102.0],[28.7,65.4]]],"262":[2,715.4,[[175.4,212.1],[138.7,175.4],[102.0,138.7],[65.4,102.0],[28.7,65.4]]],"190":[2,700.5,[[175.4,212.1],[138.7,175.4],[102.0,138.7],[65.4,102.0],[28.7,65.4]]],"291":[2,686.9,[[175.4,212.1],[138.7,175.4],[102.0,138.7],[65.4,102.0],[28.7,65.4]]],"022":[2,670.1,[[175.4,212.1],[138.7,175.4],[102.0,138.7],[65.4,102.0],[28.7,65.4]]]},"x":{"refund":[0,329.8,741.4],"couple":[0,501.8,741.4],"married":[0,501.1,399.5]}},"1301-2024":{"c":{"170":[1,115.8,769.3],"150":[1,217.9,770.4],"270":[1,115.8,750.9],"250":[1,217.9,750.9],"196":[1,115.8,733.0],"194":[1,217.9,733.0],"172":[1,115.8,715.2],"158":[1,217.9,715.2],"324":[2,94.7,395.6],"224":[2,173.6,395.6],"131":[2,66.6,465.0],"023":[2,143.9,465.0],"153":[2,49.4,493.7],"026":[2,49.4,549.4],"137":[2,118.1,231.0],"136":[2,220.8,231.0],"219":[2,118.1,212.7],"218":[2,220.8,212.7],"180":[2,118.1,188.3],"135":[2,220.8,189.3],"245":[2,118.1,75.3],"244":[2,220.8,74.3],"113":[2,118.1,270.8],"112":[2,220.8,271.8],"040":[3,118.5,454.4],"042":[3,118.0,495.8],"294":[3,118.7,516.7],"237":[3,120.2,696.3],"037":[3,222.8,696.3],"232":[3,120.2,714.2],"132":[3,222.8,714.2],"269":[3,120.2,732.4],"268":[3,222.8,732.4],"086":[3,120.2,750.3],"045":[3,222.8,750.3],"081":[3,120.2,786.4],"036":[3,222.8,787.3],"020":[2,46.0,793.7],"249":[2,118.1,55.4],"248":[2,220.8,55.4],"239":[1,114.9,52.2],"238":[1,217.1,52.6],"012":[2,118.1,36.5],"011":[2,220.8,36.5],"277":[0,337.0,154.1],"278":[0,217.7,154.0]},"k":{"260":[2,729.1,[[191.8,224.4],[159.2,191.8],[126.6,159.2],[93.9,126.6],[61.3,93.9],[28.7,61.3]]],"262":[2,715.4,[[191.8,224.4],[159.2,191.8],[126.6,159.2],[93.9,126.6],[61.3,93.9],[28.7,61.3]]],"190":[2,700.5,[[191.8,224.4],[159.2,191.8],[126.6,159.2],[93.9,126.6],[61.3,93.9],[28.7,61.3]]],"291":[2,685.9,[[191.8,224.4],[159.2,191.8],[126.6,159.2],[93.9,126.6],[61.3,93.9],[28.7,61.3]]],"022":[2,670.1,[[191.8,224.4],[159.2,191.8],[126.6,159.2],[93.9,126.6],[61.3,93.9],[28.7,61.3]]]},"x":{"refund":[0,329.8,741.4],"couple":[0,501.8,741.4],"married":[0,501.1,380.0]}},"1301-2025":{"c":{"170":[1,115.8,771.2],"150":[1,217.9,772.3],"270":[1,115.8,753.7],"250":[1,217.9,753.7],"196":[1,115.8,736.7],"194":[1,217.9,736.7],"172":[1,115.8,719.8],"158":[1,217.9,719.8],"324":[2,94.7,395.6],"224":[2,173.6,395.6],"131":[2,66.6,465.0],"023":[2,143.9,465.0],"153":[2,49.4,493.7],"026":[2,49.4,549.4],"137":[2,118.1,231.0],"136":[2,220.8,231.0],"219":[2,118.1,212.7],"218":[2,220.8,212.7],"180":[2,118.1,188.3],"135":[2,220.8,189.3],"245":[2,118.1,75.3],"244":[2,220.8,74.3],"113":[2,118.1,270.8],"112":[2,220.8,271.8],"040":[3,119.5,452.7],"042":[3,119.0,510.4],"294":[3,119.7,530.4],"237":[3,119.2,700.8],"037":[3,221.8,700.8],"232":[3,119.2,718.0],"132":[3,221.8,718.0],"269":[3,119.2,735.4],"268":[3,221.8,735.4],"086":[3,119.2,752.6],"045":[3,221.8,752.6],"081":[3,119.2,787.3],"036":[3,221.8,788.2],"020":[2,46.0,793.7],"249":[2,118.1,55.4],"248":[2,220.8,55.4],"239":[1,114.9,49.4],"238":[1,217.1,49.7],"012":[2,118.1,36.5],"011":[2,220.8,36.5],"277":[0,337.0,144.3],"278":[0,217.7,144.1]},"k":{"260":[2,729.1,[[191.8,224.4],[159.2,191.8],[126.6,159.2],[93.9,126.6],[61.3,93.9],[28.7,61.3]]],"262":[2,715.4,[[191.8,224.4],[159.2,191.8],[126.6,159.2],[93.9,126.6],[61.3,93.9],[28.7,61.3]]],"190":[2,700.5,[[191.8,224.4],[159.2,191.8],[126.6,159.2],[93.9,126.6],[61.3,93.9],[28.7,61.3]]],"291":[2,685.9,[[191.8,224.4],[159.2,191.8],[126.6,159.2],[93.9,126.6],[61.3,93.9],[28.7,61.3]]],"022":[2,670.1,[[191.8,224.4],[159.2,191.8],[126.6,159.2],[93.9,126.6],[61.3,93.9],[28.7,61.3]]]},"x":{"married":[0,501.1,368.0],"refund":[0,329.8,742.2],"couple":[0,501.8,742.2]}}};
+const FORM_URLS=Object.fromEntries(['135','1301'].flatMap(k=>[2020,2021,2022,2023,2024,2025].map(y=>[k+'-'+y,'forms/'+k+'-'+y+'.pdf'])));
+const PDFLIB_SRC='vendor/pdf-lib.min.js';
+const FONTKIT_SRC='vendor/fontkit.umd.min.js';
+const HEB_FONT_URL='vendor/fonts/assistant-hebrew-400-normal.woff'; // Hebrew font for names on the official form
+/* positions of name and ID boxes on page 1 of each official form */
+const FORM_PERS={"135-2020":{"reg":{"id":{"p":0,"cx":491.4,"y":643.3,"cells":[450.7,11.33,9]},"last":{"p":0,"cx":359.4,"y":645.9},"first":{"p":0,"cx":493.4,"y":621.4}},"sp":{"id":{"p":0,"cx":230.6,"y":643.3,"cells":[189.9,11.34,9]},"last":{"p":0,"cx":98.7,"y":645.9},"first":{"p":0,"cx":232.6,"y":621.4}},"hdr":{"p":1,"x":221.1,"y":819.5}},"135-2021":{"reg":{"id":{"p":0,"cx":491.4,"y":643.3,"cells":[450.7,11.33,9]},"last":{"p":0,"cx":359.4,"y":645.9},"first":{"p":0,"cx":493.4,"y":621.4}},"sp":{"id":{"p":0,"cx":230.6,"y":643.3,"cells":[189.9,11.34,9]},"last":{"p":0,"cx":98.7,"y":645.9},"first":{"p":0,"cx":232.6,"y":621.4}},"hdr":{"p":1,"x":221.1,"y":819.5}},"135-2022":{"reg":{"id":{"p":0,"cx":491.4,"y":643.3,"cells":[450.7,11.33,9]},"last":{"p":0,"cx":359.4,"y":645.9},"first":{"p":0,"cx":493.4,"y":621.4}},"sp":{"id":{"p":0,"cx":230.6,"y":643.3,"cells":[189.9,11.34,9]},"last":{"p":0,"cx":98.7,"y":645.9},"first":{"p":0,"cx":232.6,"y":621.4}},"hdr":{"p":1,"x":221.1,"y":819.5}},"135-2023":{"reg":{"id":{"p":0,"cx":491.4,"y":643.3,"cells":[450.7,11.33,9]},"last":{"p":0,"cx":359.4,"y":645.9},"first":{"p":0,"cx":493.4,"y":621.4}},"sp":{"id":{"p":0,"cx":230.6,"y":643.3,"cells":[189.9,11.34,9]},"last":{"p":0,"cx":98.7,"y":645.9},"first":{"p":0,"cx":232.6,"y":621.4}},"hdr":{"p":1,"x":221.1,"y":819.5}},"135-2024":{"reg":{"id":{"p":0,"cx":491.4,"y":643.3,"cells":[450.7,11.33,9]},"last":{"p":0,"cx":359.4,"y":645.9},"first":{"p":0,"cx":493.4,"y":621.4}},"sp":{"id":{"p":0,"cx":230.6,"y":643.3,"cells":[189.9,11.34,9]},"last":{"p":0,"cx":98.7,"y":645.9},"first":{"p":0,"cx":232.6,"y":621.4}},"hdr":{"p":1,"x":221.1,"y":819.5}},"135-2025":{"reg":{"id":{"p":0,"cx":491.4,"y":643.3,"cells":[450.7,11.33,9]},"last":{"p":0,"cx":359.4,"y":645.9},"first":{"p":0,"cx":493.4,"y":621.4}},"sp":{"id":{"p":0,"cx":230.6,"y":643.3,"cells":[189.9,11.34,9]},"last":{"p":0,"cx":98.7,"y":645.9},"first":{"p":0,"cx":232.6,"y":621.4}},"hdr":{"p":1,"x":221.1,"y":819.5}},"1301-2020":{"reg":{"id":{"p":0,"cx":408.2,"y":409.1,"cells":[265.1,14.2,9]},"last":{"p":0,"cx":386.3,"y":395.6},"first":{"p":0,"cx":303.1,"y":395.6}},"sp":{"id":{"p":0,"cx":192.9,"y":409.1,"cells":[49.8,14.2,9]},"last":{"p":0,"cx":171.7,"y":395.6},"first":{"p":0,"cx":88.6,"y":395.6}}},"1301-2021":{"reg":{"id":{"p":0,"cx":408.2,"y":413.5,"cells":[265.1,14.2,9]},"last":{"p":0,"cx":386.3,"y":400.2},"first":{"p":0,"cx":303.1,"y":400.2}},"sp":{"id":{"p":0,"cx":192.9,"y":413.5,"cells":[49.8,14.2,9]},"last":{"p":0,"cx":171.7,"y":400.2},"first":{"p":0,"cx":88.6,"y":400.2}}},"1301-2022":{"reg":{"id":{"p":0,"cx":408.2,"y":413.5,"cells":[265.1,14.2,9]},"last":{"p":0,"cx":386.3,"y":400.2},"first":{"p":0,"cx":303.1,"y":400.2}},"sp":{"id":{"p":0,"cx":192.9,"y":413.5,"cells":[49.8,14.2,9]},"last":{"p":0,"cx":171.7,"y":400.2},"first":{"p":0,"cx":88.6,"y":400.2}}},"1301-2023":{"reg":{"id":{"p":0,"cx":408.2,"y":413.5,"cells":[265.1,14.2,9]},"last":{"p":0,"cx":386.3,"y":400.2},"first":{"p":0,"cx":303.1,"y":400.2}},"sp":{"id":{"p":0,"cx":192.9,"y":413.5,"cells":[49.8,14.2,9]},"last":{"p":0,"cx":171.7,"y":400.2},"first":{"p":0,"cx":88.6,"y":400.2}}},"1301-2024":{"reg":{"id":{"p":0,"cx":408.2,"y":394.0,"cells":[265.1,14.2,9]},"last":{"p":0,"cx":386.3,"y":380.7},"first":{"p":0,"cx":303.1,"y":380.7}},"sp":{"id":{"p":0,"cx":192.9,"y":394.0,"cells":[49.8,14.2,9]},"last":{"p":0,"cx":171.7,"y":380.7},"first":{"p":0,"cx":88.6,"y":380.7}}},"1301-2025":{"reg":{"id":{"p":0,"cx":408.2,"y":382.0,"cells":[265.1,14.2,9]},"last":{"p":0,"cx":386.3,"y":368.8},"first":{"p":0,"cx":303.1,"y":368.8}},"sp":{"id":{"p":0,"cx":192.9,"y":382.0,"cells":[49.8,14.2,9]},"last":{"p":0,"cx":171.7,"y":368.8},"first":{"p":0,"cx":88.6,"y":368.8}}}};
+const visualHeb=s=>String(s||'').trim(); // fontkit lays out Hebrew right-to-left itself
+const formKey=(kind,Y)=>`${kind}-${Y}`;
+const lineOf=(kind,Y,key)=>FORM_LINES[kind]?.[Y]?.[key]||FORM_LINES[kind]?.[Math.min(2025,Math.max(2020,Y))]?.[key]||'';
+const hasCode=(kind,Y,code)=>{const p=FORM_POS[formKey(kind,Math.min(2025,Math.max(2020,Y)))];return !p||!code||!!p.c[code];};
+function bandDefs(Y){ // the age columns of the children table on that year's form
+  if(Y<=2021)return[['נולד',a=>a===0],['1–5',a=>a>=1&&a<=5],['6–17',a=>a>=6&&a<=17],['18',a=>a===18]];
+  if(Y<=2023)return[['נולד',a=>a===0],['1–5',a=>a>=1&&a<=5],['6–12',a=>a>=6&&a<=12],['13–17',a=>a>=13&&a<=17],['18',a=>a===18]];
+  return[['נולד',a=>a===0],['1–2',a=>a>=1&&a<=2],['3',a=>a===3],['4–5',a=>a>=4&&a<=5],['6–17',a=>a>=6&&a<=17],['18',a=>a===18]];
+}
+function kidBands(i){
+  const Y=S.year,B=bandDefs(Y),c=B.map(()=>0);
+  for(const k of S.children){if(!k.birthYear)continue;if(k.mine&&k.mine!=='both'&&Number(k.mine)!==i)continue;
+    const a=Y-n(k.birthYear);const j=B.findIndex(b=>b[1](a));if(j>=0)c[j]++;}
+  return c;
+}
+function formModel(kind){
+  const R=computeAll(),Y=S.year,A=R.r[0],Bp=S.married?R.r[1]:null,two=!!Bp;
+  const val=(x,f)=>x?Math.round(f(x)||0):0;
+  const sec=[],add=(title,rows,note)=>{rows=rows.filter(r=>r.desc&&(r.keep||r.vA||r.vB));if(rows.length)sec.push({title,rows,note});};
+  const LN=(line,key)=>lineOf(kind,Y,key)||line;
+  const r=(line,desc,cA,cB,f,keep)=>hasCode(kind,Y,cA)?({line:LN(line,cA),desc,cA,cB,vA:val(A,f),vB:val(Bp,f),keep}):({});
+  const t=(line,desc,cA,cB,f,key)=>{if(!hasCode(kind,Y,cA))return{};const a=f(A,0),b=Bp?f(Bp,1):'';return{line:LN(line,key||cA),desc,cA,cB,vA:a,vB:b,text:true,keep:!!(a||b)};};
+  const lifeOf=x=>x.a.lifeIns+n(S.persons[x.i].lifeIns)+x.a.lifeDocs;
+  const penEmpOf=x=>x.a.pensionEmp+n(S.persons[x.i].privatePension)+x.a.pensionDocs;
+  const inc=[];
+  if(kind==='1301'){
+    inc.push(r('1','מיגיעה אישית מעסק או משלח יד (לפני הניכויים שבחלק יב)','150','170',x=>x.B?x.B.profit:0));
+    inc.push(r('2א','תקבולים מביטוח לאומי בגין הכנסה כעצמאי','250','270',x=>x.B?x.B.benefits:0));
+  }
+  inc.push(r(kind==='1301'?'2ב':'2','תקבולים מביטוח לאומי כשכיר שאינם כלולים בטופס 106','194','196',x=>x.a.btlGross));
+  inc.push(r('3','משכורת ושכר עבודה (מטופסי 106)','158','172',x=>x.a.salary,true));
+  add(kind==='1301'?'ג. הכנסות מיגיעה אישית':'הכנסות',inc);
+  if(kind==='1301')add('ז. נתונים נוספים',[r('36','סך מחזור מעסק או משלח יד, ללא מע״מ','238','239',x=>x.B?x.B.rev:0)]);
+  const ded=[];
+  if(kind==='1301'){
+    ded.push(r('49','ביטוח מפני אובדן כושר עבודה ששולם בשל הכנסה כעצמאי','112','113',x=>x.B?n(x.B.b.disability):0));
+    ded.push(r('51','קרן השתלמות לעצמאים (הסכום ששולם)','136','137',x=>x.B?n(x.B.b.keren):0));
+  }
+  ded.push(r('52','משכורת שבשלה שילם המעביד לקרן השתלמות','218','219',x=>x.a.keren));
+  if(kind==='1301')ded.push(r('53','קופת גמל לקצבה כעמית עצמאי: החלק לניכוי (ס׳ 47)','135','180',x=>x.B?x.B.penDed:0));
+  ded.push(r('58','הכנסה מבוטחת','244','245',x=>x.a.insured));
+  ded.push(r('59','הפקדות המעביד לקופת גמל לקצבה','248','249',x=>x.a.pensionEr));
+  if(Y===2024||Y===2025)ded.push(r('60','השתתפות זמנית: הפחתת דמי הבראה (לידיעה)','011','012',x=>x.a.havraa));
+  add(kind==='1301'?'יב. ניכויים אישיים':'ניכויים ונתוני הפרשות',ded);
+  // credit points
+  const KB=bandDefs(Y).map(b=>b[0]==='נולד'?'נולד/ה בשנת המס':'מלאו '+b[0]);
+  const kidTxt=x=>{const c=kidBands(x.i);return c.some(Boolean)?KB.map((l,j)=>c[j]?`${l}: ${c[j]}`:'').filter(Boolean).join(', '):'';};
+  const pts=[];
+  const famOf=x=>S.persons[x.i].family;
+  pts.push(t('64','ילדים — שורה (1): בחזקתי / מקבל/ת קצבת ילדים','260','262',x=>famOf(x)==='apart_noncust'?'':kidTxt(x),'kids'));
+  pts.push(t('64','ילדים — שורה (2): ילדיי שאינם בחזקתי','190','291',x=>famOf(x)==='apart_noncust'?kidTxt(x):'','kids'));
+  pts.push(t('64','ילדים — שורה (3): הורה יחיד, אין הורה שני רשום או שנפטר (בנוסף לשורה 1)','022','',x=>famOf(x)==='sole'?kidTxt(x):'','kids'));
+  pts.push(t('65','הורה במשפחה חד־הורית שהילדים בחזקתו','026','',x=>famOf(x)==='single'||famOf(x)==='sole'?'כן':''));
+  pts.push(t('66','השתתפות בכלכלת ילדים שאינם סמוכים על שולחני','028','029',x=>famOf(x)==='apart_noncust'?'כן':''));
+  pts.push(t('67','תשלום מזונות לבן/בת זוג לשעבר (נשוי/אה בשנית)','153','',x=>famOf(x)==='alimony'?'כן':''));
+  pts.push(t('68','מספר ילדים עם מוגבלות שבגינם נדרשות נקודות','023','131',x=>n(S.persons[x.i].disabledChildren)||''));
+  pts.push(t('69','עולה חדש: תאריך עלייה','273','274',x=>{const d=S.persons[x.i].oleh.date;return d&&olehPts(d,Y)?d.split('-').reverse().join('/'):'';}));
+  pts.push(t('71','חייל/ת משוחרר/ת: תאריך שחרור (חודש/שנה)','224','324',x=>{const d=S.persons[x.i].discharge;return d.date&&soldierPts(d,Y)?`${d.date.split('-').reverse().join('/')}${d.full?', שירות מלא':''}`:'';}));
+  pts.push(t('72','סיום תואר / לימודי מקצוע: שנת סיום (וקוד מטופס 119)','181','182',x=>{const g=S.persons[x.i].degree;return degreePts(g,Y)?`${g.type==='ma'?'תואר שני':g.type==='voc'?'לימודי מקצוע':'תואר ראשון'}, ${g.year}`:'';}));
+  add('יג. נקודות זיכוי',pts,'הערכים כאן הם לסימון בטופס. נקודות הבסיס (תושב/ת, אישה) ניתנות אוטומטית.');
+  const cr=[];
+  cr.push(r('73','ביטוח חיים','036','081',lifeOf));
+  cr.push(r('75','לקצבה כעמית שכיר','045','086',penEmpOf));
+  if(kind==='1301')cr.push(r('76','לקצבה כעמית עצמאי: החלק לזיכוי (ס׳ 45א)','268','269',x=>x.B?x.B.penCreditBase:0));
+  cr.push(r('78א','תרומות למוסדות ציבור בישראל (ס׳ 46)','037','237',x=>x.don));
+  cr.push(t('82','תושב/ת יישוב מזכה: שיעור ותקרה','','',x=>{const y=S.persons[x.i].yishuv;return y.on&&n(y.rate)?`${y.rate}% עד ${nf.format(n(y.ceiling))} ₪`:'';}));
+  cr.push(t('77','החזקת בן משפחה במוסד','132','232',x=>S.persons[x.i].ev.institution?'יש לצרף טופס 116א':''));
+  add('יד. זיכויים אישיים',cr);
+  const sum=(f)=>R.r.reduce((a,x)=>a+Math.round(f(x)||0),0);
+  const tot=[];
+  if(kind==='1301')tot.push({line:lineOf(kind,Y,'294')||'83',desc:'סך המחזור מכל העסקים, ללא מע״מ',cA:'294',cB:'',vA:sum(x=>x.B?x.B.rev:0),vB:''});
+  tot.push({line:lineOf(kind,Y,'042')||'84',desc:'מס הכנסה שנוכה במקור ממשכורת, משכר עבודה ומקצבאות (סה״כ)',cA:'042',cB:'',vA:sum(x=>x.a.withheld+x.a.btlTax),vB:'',keep:true});
+  if(kind==='1301')tot.push({line:lineOf(kind,Y,'040')||'87',desc:'סכומים שנוכו במקור מהכנסות אחרות (סה״כ, מצ״ב אישורים)',cA:'040',cB:'',vA:sum(x=>x.B?x.B.withheldInv:0),vB:''});
+  add('טו. ניכויים במקור',tot);
+  return{kind,Y,two,sec,R};
+}
+function formTable(sec,two,pdf){
+  const T=pdf?'r-t':'calc',N=pdf?'n':'n';
+  const cell=(v,text)=>v===''||v===0||v===undefined?'':text?esc(v):(pdf?rm(v):money(v));
+  return `<table class="${T}"><tr><th>שורה</th><th>תיאור</th><th>שדה</th><th>${two?'בן הזוג הרשום':'סכום / ערך'}</th>${two?'<th>שדה</th><th>בן/בת הזוג</th>':''}</tr>
+   ${sec.rows.map(x=>{const a=cell(x.vA,x.text),b=cell(x.vB,x.text);return `<tr><td>${x.line}</td><td>${x.desc}</td><td class="${N}"><b>${a||x.keep?x.cA:''}</b></td><td class="${x.text?'':N}">${a}</td>${two?`<td class="${N}"><b>${b?x.cB:''}</b></td><td class="${x.text?'':N}">${b}</td>`:''}</tr>`;}).join('')}</table>`;
+}
+function formNotes(m){
+  const ob=obligations(m.R),Y=m.Y,anyBiz=m.R.r.some(x=>x.B);
+  const out=[];
+  if(m.kind==='135'&&ob.length)out.push(`<b>שימו לב:</b> זוהו סימנים לחובת דוח מלא, ולכן טופס 135 כנראה אינו המסלול הנכון: ${ob.join(' ')}`);
+  if(m.kind==='1301'&&anyBiz)out.push('לכל עסק יש לצרף נספח א׳ (טופס 1320). מקדמות ששולמו אינן נרשמות בטופס; הן נזקפות בשומה לפי חשבון המס.');
+  if(m.kind==='1301'&&anyBiz)out.push('החלוקה של הפקדות הפנסיה כעצמאי בין החלק לניכוי (135/180) לחלק לזיכוי (268/269) חושבה באשף. ודאו אותה לפי הוראות המילוי של הטופס או עם מייצג.');
+  out.push('פרטי חשבון הבנק להחזר: שדות 277 ו־278. יש לחתום על הטופס (שני בני הזוג, אם נשואים) ולצרף את המסמכים.');
+  out.push(`קודי השדות ומספרי השורות לפי טופס ${m.kind} הרשמי של רשות המסים לשנת המס ${Math.min(2025,Math.max(2020,Y))}.`);
+  out.push('ממלאים ידנית: כתובת, טלפון, קוד לימודים מטופס 119, מספר חודשי שירות וחתימות.');
+  return out;
+}
+function formBlocks(kind){
+  const m=formModel(kind),Y=m.Y,nm=i=>esc(S.persons[i].name||personLabel(i));const B=[];
+  B.push(`<div class="r-title"><div class="r-kicker">דף מילוי, לא הטופס הרשמי</div><h1>טופס&nbsp;${kind}, שנת&nbsp;מס&nbsp;${Y}</h1>
+    <p>${kind==='135'?'דוח שנתי מקוצר / בקשה להחזר מס':'דין וחשבון שנתי ליחיד'}</p>
+    <p class="r-muted">הערכים להעתקה לטופס הרשמי או לשירות המקוון של רשות המסים. הופק ב־${TODAY.toLocaleDateString('he-IL')}.</p></div>`);
+  B.push(`<table class="r-t"><tr><th>בן הזוג הרשום</th><td>${nm(0)} ${esc(S.persons[0].lastName||'')}</td><th>מספר זהות</th><td class="n">${esc(S.persons[0].idNum||'__________')}</td></tr>
+    ${S.married?`<tr><th>בן/בת הזוג</th><td>${nm(1)} ${esc(S.persons[1].lastName||'')}</td><th>מספר זהות</th><td class="n">${esc(S.persons[1].idNum||'__________')}</td></tr>`:''}
+    ${S.bank?.account?`<tr><th>חשבון בנק (277/278)</th><td colspan="3" class="n">${esc(S.bank.code||'')}-${esc(S.bank.branch||'')}-${esc(S.bank.account)}</td></tr>`:''}
+    <tr><th>מצב משפחתי</th><td>${S.married?'נשוי/אה וחי/ה ביחד':'לא נשוי/אה'}</td><th>הדוח הוא על</th><td>${S.married?'הכנסותיי והכנסות בן/בת זוגי':'הכנסותיי בלבד'}</td></tr>
+    ${m.R.tot>0&&!obligations(m.R).length?`<tr><th colspan="2">סימון בחלק א</th><td colspan="2">אני מגיש/ה דוח למרות שאיני חייב/ת: בקשה להחזר מס</td></tr>`:''}</table>`);
+  for(const sec of m.sec)B.push(`<div class="r-h3">${sec.title}</div>${formTable(sec,m.two,true)}${sec.note?`<p class="r-legal" style="margin-top:3px">${sec.note}</p>`:''}`);
+  const x=Math.abs(m.R.tot)>=1?linkInterest(m.R.tot,Y):null;
+  B.push(`<div class="r-sum"><div><div class="k">${m.R.tot>=0?'החזר משוער':'חוב משוער'} לפי האשף</div><div class="v ${m.R.tot>=0?'pos':'neg'}">${rm(Math.abs(m.R.tot))}</div></div>
+    <div><div class="k">כולל הצמדה וריבית${x?' עד '+x.pay.toLocaleDateString('he-IL'):''}</div><div class="v">${x?rm(Math.abs(x.total)):'—'}</div></div>
+    <div><div class="k">מועד אחרון</div><div class="v" style="font-size:16px">${kind==='135'?`31.12.${Y+6}`:'לפי לוח ההגשה של השנה'}</div></div></div>`);
+  B.push(`<h2 class="r-h2">הערות למילוי</h2><ul class="r-list">${formNotes(m).map(t=>`<li>${t}</li>`).join('')}</ul>`);
+  const tr=triggers(m.R);const always=['טופסי 106 מכל המעסיקים','צילום תעודת זהות כולל ספח','אישור ניהול חשבון בנק'];
+  B.push(`<h2 class="r-h2">מסמכים לצרף</h2><ul class="r-list">${[...new Set([...always,...tr.flatMap(t=>t.docs)])].map(d=>`<li>${d}</li>`).join('')}</ul>`);
+  B.push(`<p class="r-legal">דף העזר הופק אוטומטית. הוא אינו הטופס הרשמי, ואין להגיש אותו כמות שהוא. החישוב המחייב הוא של רשות המסים.</p>`);
+  return B;
+}
+function formsBlock(R){
+  const ob=obligations(R),rec=ob.length?'1301':'135';
+  const prev=k=>{const m=formModel(k);return m.sec.map(sec=>`<h4 style="margin:12px 0 4px">${sec.title}</h4><div class="scroll-x">${formTable(sec,m.two,false)}</div>`).join('')+`<ul class="plain" style="margin-top:10px">${formNotes(m).map(t=>`<li>${t}</li>`).join('')}</ul>`;};
+  return `<div class="block"><h3>טפסי דיווח לרשות המסים</h3>
+   <p class="hint">דף מילוי עם כל קודי השדות והסכומים, להעתקה לטופס הרשמי או לשירות המקוון. המסלול המתאים לפי הנתונים: <b>טופס ${rec}</b>${ob.length?' (יש סימנים לחובת דוח מלא)':''}.</p>
+   <div style="display:flex;gap:10px;flex-wrap:wrap">
+     <button class="btn ${rec==='135'?'':'ghost'}" data-official="135">טופס 135 רשמי ממולא</button>
+     <button class="btn ${rec==='1301'?'':'ghost'}" data-official="1301">טופס 1301 רשמי ממולא</button></div>
+   <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:8px">
+     <button class="btn ghost small" data-form="135">דף מילוי 135</button>
+     <button class="btn ghost small" data-form="1301">דף מילוי 1301</button></div>
+   ${S.year>2025?`<p class="hint" style="margin-top:8px">הטופס הרשמי של ${S.year} עוד לא פורסם. הטופס ימולא על גבי הטופס של 2025, לבדיקה בלבד.</p>`:''}
+   <p class="hint" style="margin-top:8px">הטופס הרשמי של רשות המסים לשנת ${Math.min(2025,Math.max(2020,S.year))}, עם הסכומים, ספירת הילדים לפי עמודות הגיל של אותה שנה והסימונים בחלק א׳. הטופס כולל גם שמות, מספרי זהות ופרטי בנק שהזנתם בשלב 1. נשאר למלא ביד כתובת, טלפון וחתימות.</p>
+   <details style="margin-top:12px"><summary style="cursor:pointer;font-weight:700">תצוגה מקדימה: טופס 135</summary>${prev('135')}</details>
+   <details style="margin-top:8px"><summary style="cursor:pointer;font-weight:700">תצוגה מקדימה: טופס 1301</summary>${prev('1301')}</details>
+   <p class="hint" style="margin-top:10px">הגשה: <a href="https://www.gov.il/he/service/itc135" target="_blank" rel="noopener">טופס 135 ובקשת החזר מס</a>, <a href="https://www.gov.il/he/service/reporting-and-payment-2025-annual-tax-report-for-individuals" target="_blank" rel="noopener">דוח שנתי 1301 לשנת 2025</a>.</p></div>`;
+}
+
+/* ---- official form: write the values onto the ITA PDF of that year ---- */
+async function makeOfficialPdf(btn,kind){
+  const Y=S.year,Yf=Math.min(2025,Math.max(2020,Y)),key=formKey(kind,Yf),P=FORM_POS[key];
+  if(!P||!FORM_URLS[key]){alert(`הטופס הרשמי לשנת ${Y} לא זמין כאן. אפשר להפיק דף מילוי.`);return;}
+  const label=btn.textContent;btn.disabled=true;btn.textContent='ממלא את הטופס…';
+  try{
+    await loadScript(PDFLIB_SRC);
+    const res=await fetch(FORM_URLS[key]);if(!res.ok)throw new Error('fetch');
+    const L=window.PDFLib,doc=await L.PDFDocument.load(await res.arrayBuffer());
+    const font=await doc.embedFont(L.StandardFonts.Helvetica),bold=await doc.embedFont(L.StandardFonts.HelveticaBold);
+    const pages=doc.getPages(),ink=L.rgb(.05,.2,.6);
+    const put=(code,v,size=9)=>{const c=P.c[code];if(!c||v===''||v===null||v===undefined||v===0)return;const s=String(typeof v==='number'?Math.round(v):v);
+      pages[c[0]].drawText(s,{x:c[1]-4-font.widthOfTextAtSize(s,size),y:c[2],size,font,color:ink});};
+    const xCode=code=>{const c=P.c[code];if(c)pages[c[0]].drawText('X',{x:c[1]-12,y:c[2],size:9,font:bold,color:ink});};
+    const chk=k=>{const c=P.x[k];if(c)pages[c[0]].drawText('X',{x:c[1]-2.7,y:c[2],size:7.5,font:bold,color:ink});};
+    const m=formModel(kind),R=m.R;
+    for(const sec of m.sec)for(const r of sec.rows){if(r.text)continue;
+      if(typeof r.vA==='number')put(r.cA,r.vA);if(r.cB&&typeof r.vB==='number')put(r.cB,r.vB);}
+    // personal status
+    if(S.married){chk('married');chk('couple');}
+    if(R.tot>0&&!obligations(R).length)chk('refund');
+    xCode('020');
+    // personal details
+    const PP=FORM_PERS[key]||{};let heb=null;
+    const names=persons().some(i=>S.persons[i].name||S.persons[i].lastName);
+    if(names&&HEB_FONT_URL){try{await loadScript(FONTKIT_SRC);doc.registerFontkit(window.fontkit);
+      heb=await doc.embedFont(await (await fetch(HEB_FONT_URL)).arrayBuffer(),{subset:true});}catch(e){heb=null;}}
+    const center=(f,s,ent,size=10)=>{if(!ent||!s)return;pages[ent.p].drawText(s,{x:ent.cx-f.widthOfTextAtSize(s,size)/2,y:ent.y,size,font:f,color:ink});};
+    persons().forEach(i=>{const p=S.persons[i],E=PP[i===0?'reg':'sp'];if(!E)return;
+      if(heb){center(heb,visualHeb(p.name),E.first);center(heb,visualHeb(p.lastName),E.last);}
+      const id=String(p.idNum||'').replace(/\D/g,'');
+      if(id&&E.id){const d=id.padStart(9,'0');
+        if(E.id.cells){const [c0,st]=E.id.cells;d.split('').forEach((ch,j)=>pages[E.id.p].drawText(ch,{x:c0+st*j-font.widthOfTextAtSize(ch,10)/2,y:E.id.y,size:10,font,color:ink}));}
+        else center(font,d.split('').join(' '),E.id);}
+    });
+    const id0=String(S.persons[0].idNum||'').replace(/\D/g,'');
+    if(id0&&PP.hdr)pages[PP.hdr.p].drawText(id0.padStart(9,'0'),{x:PP.hdr.x-font.widthOfTextAtSize(id0.padStart(9,'0'),9),y:PP.hdr.y,size:9,font,color:ink});
+    const bk=S.bank||{};if(bk.account)put('277',String(bk.account).replace(/\D/g,''));
+    if(bk.code||bk.branch)put('278',`${bk.code||''}   ${bk.branch||''}`);
+    persons().forEach(i=>{
+      const p=S.persons[i],A=i===0,fam=p.family;
+      const counts=kidBands(i);const rows=fam==='apart_noncust'?[A?'190':'291']:fam==='sole'&&A?['260','022']:[A?'260':'262'];
+      for(const rc of rows){const k=P.k[rc];if(!k)continue;counts.forEach((cnt,j)=>{if(!cnt||!k[2][j])return;const [x0,x1]=k[2][j];const s=String(cnt);
+        pages[k[0]].drawText(s,{x:(x0+x1)/2-font.widthOfTextAtSize(s,9)/2,y:k[1],size:9,font,color:ink});});}
+      if(A&&(fam==='single'||fam==='sole'))xCode('026');
+      if(A&&fam==='alimony')xCode('153');
+      if(n(p.disabledChildren))put(A?'023':'131',n(p.disabledChildren));
+      const d=p.discharge;if(d.date&&soldierPts(d,Y)){const [yy,mm]=d.date.split('-');put(A?'224':'324',`${yy}   ${mm}`,8.5);}
+    });
+    doc.setTitle(`טופס ${kind} ${Y}`);
+    const bytes=await doc.save();const blob=new Blob([bytes],{type:'application/pdf'});
+    let dl=null;try{dl=window.claude?.use?await window.claude.use('downloads'):null;}catch(e){}
+    if(dl){try{await dl.save({filename:`official-${kind}-${Y}.pdf`,data:blob});}catch(e){if(e.code!=='declined')alert('השמירה לא הצליחה. נסו שוב.');}}
+    else alert('השמירה לא הצליחה.');
+  }catch(e){alert('לא הצלחנו למלא את הטופס הרשמי. נסו שוב, או הפיקו דף מילוי.');}
+  finally{btn.disabled=false;btn.textContent=label;}
+}
+
 /* ---- PDF report ---- */
 function loadScript(src){return new Promise((res,rej)=>{if(document.querySelector(`script[src="${src}"]`)&&(src.includes('html2canvas')?window.html2canvas:window.jspdf))return res();const sc=document.createElement('script');sc.src=src;sc.onload=res;sc.onerror=()=>rej(new Error('load'));document.head.appendChild(sc);});}
 function bracketRows(income,Y){const rows=[];let rem=Math.max(income,0),prev=0;for(const[m,r]of TAX.brackets[Y]){const top=m*12,u=Math.min(rem,top-prev);if(u>0)rows.push({from:prev,to:prev+u,rate:r,tax:u*r});rem-=u;prev=top;if(rem<=0)break;}return rows;}
@@ -1166,7 +1475,7 @@ const docStatus=d=>d.fromFile?(d.verified?(d.edited?.length?'פוענח ואומ
 function reportBlocks(){
   const R=computeAll(),Y=S.year,ob=obligations(R),tr=triggers(R),neg=R.tot<0,x=Math.abs(R.tot)>=1?linkInterest(R.tot,Y):null;
   const nm=i=>esc(S.persons[i].name||personLabel(i));const B=[];
-  B.push(`<div class="r-title"><div class="r-kicker">סיכום דוח שנתי והחזר מס לשכיר</div><h1>שנת מס ${Y}</h1>
+  B.push(`<div class="r-title"><div class="r-kicker">סיכום דוח שנתי והחזר מס לשכיר</div><h1>שנת&nbsp;מס&nbsp;${Y}</h1>
     <p>${persons().map(nm).join(' ו')}${S.married?' (זוג נשוי, המס מחושב לכל אחד בנפרד)':''}</p><p class="r-muted">הופק ב־${TODAY.toLocaleDateString('he-IL')}</p></div>`);
   B.push(`<div class="r-sum">
     <div><div class="k">${neg?'חוב מס משוער':'החזר משוער'} בערכי סוף ${Y}</div><div class="v ${neg?'neg':'pos'}">${rm(Math.abs(R.tot))}</div></div>
@@ -1184,6 +1493,7 @@ function reportBlocks(){
         const inc=d.type==='form106'?f.salary:d.type==='btl'?f.btlGross:d.type==='donation'?f.donation:d.type==='pension'?n(f.pensionSelf)+n(f.lifeIns):d.type==='form867'?f.capital:'';
         const w=d.type==='form106'?f.withheld:d.type==='btl'?f.btlTax:d.type==='form867'?f.capitalTax:'';
         return `<tr><td>${t}</td><td>${esc(d.issuer||d.fileName||'')}</td><td class="n">${inc!==''&&inc!==undefined?rm(n(inc)):''}</td><td class="n">${w!==''&&w!==undefined?rm(n(w)):''}</td><td class="n">${d.type==='form106'&&f.months?f.months:''}</td><td>${docStatus(d)}</td></tr>`;}).join('')||'<tr><td colspan="6">לא הוזנו מסמכים</td></tr>'}
+      ${r.B?`<tr><td>הכנסה מעסק</td><td>מחזור ${rm(r.B.rev)}, הוצאות ${rm(r.B.exp)}</td><td class="n">${rm(r.B.taxable)}</td><td class="n">${r.B.withheldInv?rm(r.B.withheldInv):''}</td><td></td><td>${r.B.b.small?'עסק זעיר (30%)':'הוזן ידנית'}</td></tr>`:''}
       <tr class="s"><td colspan="2">סה״כ שנכלל בחישוב</td><td class="n">${rm(r.income)}</td><td class="n">${rm(r.withheld)}</td><td></td><td></td></tr></table>`);
     const br=bracketRows(r.income,Y);
     B.push(`<div class="r-h3">חישוב המס לפי מדרגות ${Y}</div><table class="r-t"><tr><th>מדרגה</th><th>שיעור</th><th>הכנסה במדרגה</th><th>מס</th></tr>
@@ -1195,10 +1505,11 @@ function reportBlocks(){
       <tr class="s"><td>סה״כ נקודות זיכוי</td><td class="n">${nf2.format(r.points)}</td><td class="n">${rm(r.pointsVal)}</td></tr>
       ${r.pensionCredit?`<tr><td>זיכוי 35% על הפקדות לפנסיה (ס׳ 45א), בסיס ${rm(r.pensionBase)}</td><td></td><td class="n">${rm(r.pensionCredit)}</td></tr>`:''}
       ${r.lifeCredit?`<tr><td>זיכוי 25% על ביטוח חיים</td><td></td><td class="n">${rm(r.lifeCredit)}</td></tr>`:''}
+      ${r.bizCredit?`<tr><td>זיכוי 35% על פנסיה כעצמאי (ס׳ 45א), בסיס ${rm(r.B.penCreditBase)}</td><td></td><td class="n">${rm(r.bizCredit)}</td></tr>`:''}
       ${r.donCredit?`<tr><td>זיכוי 35% על תרומות (ס׳ 46), תרומות ${rm(r.don)}</td><td></td><td class="n">${rm(r.donCredit)}</td></tr>`:''}
       ${r.yCredit?`<tr><td>זיכוי יישוב מוטב (ס׳ 11)</td><td></td><td class="n">${rm(r.yCredit)}</td></tr>`:''}</table>`);
     B.push(`<table class="r-t"><tr><td>מס לפני זיכויים</td><td class="n">${rm(r.gross)}</td></tr><tr><td>פחות סך הזיכויים</td><td class="n">−${rm(Math.min(r.credits,r.gross))}</td></tr>
-      <tr class="s"><td>מס שהיה צריך לשלם</td><td class="n">${rm(r.due)}</td></tr><tr><td>מס שנוכה בפועל</td><td class="n">${rm(r.withheld)}</td></tr>
+      <tr class="s"><td>מס שהיה צריך לשלם</td><td class="n">${rm(r.due)}</td></tr><tr><td>מס שנוכה במקור</td><td class="n">${rm(r.withheld)}</td></tr>${r.advances?`<tr><td>מקדמות ששולמו</td><td class="n">${rm(r.advances)}</td></tr>`:''}
       <tr class="s ${r.refund>=0?'g':'b'}"><td>${r.refund>=0?'החזר משוער':'חוב משוער'}</td><td class="n">${rm(Math.abs(r.refund))}</td></tr></table>${r.donNote?`<div class="r-note" style="margin-top:6px">${r.donNote}</div>`:''}`);
   }
   if(x)B.push(`<h2 class="r-h2">שערוך: הפרשי הצמדה וריבית</h2>
@@ -1216,7 +1527,8 @@ function reportBlocks(){
   B.push(`<p class="r-legal">המסמך הופק אוטומטית לפי כללי רשות המסים לשנת ${Y} (מדרגות, ערך נקודת זיכוי ותקרות מחוברת הניכויים). זו הערכה ואינה ייעוץ מס או דוח שהוגש; החישוב המחייב הוא של רשות המסים. מומלץ לבדוק בסימולטור הרשמי או עם רואה חשבון לפני הגשה.</p>`);
   return B;
 }
-async function makePdf(btn){
+async function makePdf(btn,blocks,headTitle,filenameIn){
+  blocks=blocks||reportBlocks();headTitle=headTitle||`דוח שנתי לשכיר, שנת מס ${S.year}`;
   const label=btn.textContent;btn.disabled=true;btn.textContent='מכין PDF…';
   let root;
   try{
@@ -1226,10 +1538,10 @@ async function makePdf(btn){
     root=document.createElement('div');root.id='rpt-root';root.setAttribute('aria-hidden','true');document.body.appendChild(root);
     const pages=[];
     const newPage=()=>{const el=document.createElement('div');el.className='rp';
-      el.innerHTML=`<div class="rp-head"><b>דוח שנתי לשכיר, שנת מס ${S.year}</b><span>${esc(persons().map(i=>S.persons[i].name).filter(Boolean).join(', '))}</span></div><div class="rp-body"></div><div class="rp-foot"><span>הערכה בלבד, אינה ייעוץ מס</span><span class="pg"></span></div>`;
+      el.innerHTML=`<div class="rp-head"><b>${headTitle}</b><span>${esc(persons().map(i=>S.persons[i].name).filter(Boolean).join(', '))}</span></div><div class="rp-body"></div><div class="rp-foot"><span>הערכה בלבד, אינה ייעוץ מס</span><span class="pg"></span></div>`;
       root.appendChild(el);const p={el,body:el.querySelector('.rp-body'),pg:el.querySelector('.pg')};pages.push(p);return p;};
     let page=newPage();
-    for(const html of reportBlocks()){const blk=document.createElement('div');blk.className='r-blk';blk.innerHTML=html;page.body.appendChild(blk);
+    for(const html of blocks){const blk=document.createElement('div');blk.className='r-blk';blk.innerHTML=html;page.body.appendChild(blk);
       if(page.body.scrollHeight>page.body.clientHeight+1&&page.body.children.length>1){blk.remove();page=newPage();page.body.appendChild(blk);}}
     pages.forEach((p,i)=>p.pg.textContent=`עמוד ${i+1} מתוך ${pages.length}`);
     const pdf=new window.jspdf.jsPDF({unit:'mm',format:'a4',compress:true});
@@ -1237,7 +1549,7 @@ async function makePdf(btn){
       const c=await window.html2canvas(pages[i].el,{scale:2,backgroundColor:'#ffffff',logging:false});
       if(i)pdf.addPage();pdf.addImage(c.toDataURL('image/jpeg',.9),'JPEG',0,0,210,297);}
     pdf.setProperties({title:`דוח שנתי ${S.year}`});
-    const blob=pdf.output('blob');const filename=`tax-report-${S.year}.pdf`;
+    const blob=pdf.output('blob');const filename=filenameIn||`tax-report-${S.year}.pdf`;
     let dl=null;try{dl=window.claude?.use?await window.claude.use('downloads'):null;}catch(e){}
     if(dl){try{await dl.save({filename,data:blob});}catch(e){if(e.code!=='declined')alert('השמירה לא הצליחה. נסו שוב.');}}
     else alert('השמירה לא הצליחה.');
@@ -1294,6 +1606,8 @@ document.addEventListener('click',e=>{
   if(t.id==='aiStop'){aiCtl?.abort();return;}
   if(t.id==='dl'){exportSummary();return;}
   if(t.id==='pdf'){makePdf(t);return;}
+  if(t.dataset.official){makeOfficialPdf(t,t.dataset.official);return;}
+  if(t.dataset.form){const k=t.dataset.form;makePdf(t,formBlocks(k),`דף מילוי לטופס\u00a0${k}, שנת\u00a0מס\u00a0${S.year}`,`form-${k}-${S.year}.pdf`);return;}
 });
 document.getElementById('review').addEventListener('cancel',e=>{e.preventDefault();closeReview();});
 document.addEventListener('keydown',e=>{if(e.target.id==='drop'&&(e.key==='Enter'||e.key===' ')){e.preventDefault();$('#file').click();}});
