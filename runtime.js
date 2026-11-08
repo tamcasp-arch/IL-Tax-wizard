@@ -109,17 +109,17 @@
     d.querySelector('#setFile').onchange=e=>{const f=e.target.files[0];if(f)restore(f);e.target.value='';};
     d.querySelector('#setClose').onclick=()=>d.close();
     d.querySelector('#setHealth').onclick=async()=>{const out=d.querySelector('#healthOut');out.textContent='בודק…';const L=[];
-      const files=['vendor/pdf.min.js','vendor/pdf.worker.min.js','vendor/tesseract/tesseract.min.js','vendor/tesseract/worker.min.js','vendor/tesseract/core/tesseract-core-lstm.wasm.js','vendor/tesseract/core/tesseract-core-simd-lstm.wasm.js','vendor/tesseract/lang/heb.traineddata.gz','vendor/tesseract/lang/eng.traineddata.gz','vendor/pdf-lib.min.js','vendor/fontkit.umd.min.js'];
+      const files=['pdf.min.js','pdf.worker.min.js','tesseract.min.js','worker.min.js','./tesseract-core-lstm.wasm.js','./tesseract-core-simd-lstm.wasm.js','./heb.traineddata.gz','./eng.traineddata.gz','pdf-lib.min.js','fontkit.umd.min.js'];
       let miss=0;for(const f of files){try{const r=await fetch(f+'?check='+Date.now(),{method:'HEAD',cache:'no-store'});if(!r.ok){miss++;L.push('✗ חסר באתר: '+f);}}catch(e){miss++;L.push('✗ לא נגיש: '+f);}}
-      let fm=0;for(const k of ['135-2025','1301-2025']){try{const r=await fetch('forms/'+k+'.pdf',{method:'HEAD',cache:'no-store'});if(!r.ok)fm++;}catch(e){fm++;}}
+      let fm=0;for(const k of ['135-2025','1301-2025']){try{const r=await fetch(''+k+'.pdf',{method:'HEAD',cache:'no-store'});if(!r.ok)fm++;}catch(e){fm++;}}
       if(!miss)L.push('✓ כל קובצי הפענוח נמצאים באתר');
       else L.push(`⚠ ${miss} קבצים חסרים. האפליקציה תטען אותם מהאינטרנט (CDN), אז הפענוח יעבוד, אבל לא בלי חיבור. כדי לתקן: להעלות את התיקייה vendor למאגר, באותה רמה של index.html.`);
       L.push(fm?'✗ הטפסים הרשמיים חסרים (התיקייה forms). דפי מילוי יעבדו, מילוי הטופס הרשמי לא.':'✓ הטפסים הרשמיים נמצאים באתר');
       if(!window.pdfjsLib&&typeof ensurePdfJs==='function')await ensurePdfJs();
       L.push(window.pdfjsLib?'✓ קריאת PDF נטענה':'✗ קריאת PDF לא נטענה');
       {try{out.textContent=L.join('\n')+'\nבודק זיהוי טקסט (עד דקה בפעם הראשונה)…';const w=await getOcr();
-        const c=document.createElement('canvas');c.width=300;c.height=80;const g=c.getContext('2d');g.fillStyle='#fff';g.fillRect(0,0,300,80);g.fillStyle='#000';g.font='bold 36px Arial';g.fillText('158 42,772',20,52);
-        const {data}=await w.recognize(await new Promise(res=>c.toBlob(res)));L.push(/158/.test(data.text)&&/42,?772/.test(data.text)?'✓ זיהוי טקסט עובד':'⚠ זיהוי טקסט רץ אבל קרא: '+data.text.trim());}
+        const c=document.createElement('canvas');c.width=900;c.height=200;const g=c.getContext('2d');g.fillStyle='#fff';g.fillRect(0,0,900,200);g.fillStyle='#000';g.font='56px Arial, sans-serif';g.fillText('158     42,772',80,120);
+        const {data}=await w.recognize(await new Promise(res=>c.toBlob(res)));L.push(/158/.test(data.text)&&/772/.test(data.text)?'✓ זיהוי טקסט עובד':'⚠ זיהוי טקסט רץ, אבל קרא רק: '+data.text.trim()+' (בבדיקה הזו זה לא בהכרח תקלה; נסו טופס אמיתי)');}
         catch(e){L.push('✗ זיהוי טקסט נכשל: '+(e&&e.message||e));}}
       L.push('גרסה: '+APP_VERSION+(getCfg().key?' · מפתח API מוגדר':' · בלי מפתח API'));
       out.textContent=L.join('\n');};
@@ -138,24 +138,24 @@
 
   /* ---------- distribution build: version, local OCR, terms, updates ---------- */
   window.CDN_FALLBACK={ // used only when a bundled file is missing on the site (needs internet)
-    'vendor/html2canvas.min.js':'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js',
-    'vendor/jspdf.umd.min.js':'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js',
-    'vendor/pdf-lib.min.js':'https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js',
-    'vendor/fontkit.umd.min.js':'https://cdn.jsdelivr.net/npm/@pdf-lib/fontkit@1.1.1/dist/fontkit.umd.min.js',
-    'vendor/fonts/assistant-hebrew-400-normal.woff':'https://cdn.jsdelivr.net/npm/@fontsource/assistant@5.1.0/files/assistant-hebrew-400-normal.woff',
-    'vendor/tesseract/tesseract.min.js':'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js'
+    'html2canvas.min.js':'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js',
+    'jspdf.umd.min.js':'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js',
+    'pdf-lib.min.js':'https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js',
+    'fontkit.umd.min.js':'https://cdn.jsdelivr.net/npm/@pdf-lib/fontkit@1.1.1/dist/fontkit.umd.min.js',
+    'assistant-hebrew-400-normal.woff':'https://cdn.jsdelivr.net/npm/@fontsource/assistant@5.1.0/files/assistant-hebrew-400-normal.woff',
+    'tesseract.min.js':'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js'
   };
-  const APP_VERSION='1.0.7-beta';
+  const APP_VERSION='1.0.8-beta';
   const TERMS_VER='1';
 
   /* local OCR for scans and photos (Tesseract, Hebrew) — runs in the browser, nothing is uploaded */
   let ocrWorker=null;
   let ocrLocal=null;
   async function getOcr(onProg){
-    if(ocrLocal===null){try{const h=await fetch('vendor/tesseract/lang/heb.traineddata.gz',{method:'HEAD',cache:'no-store'});ocrLocal=h.ok;}catch(e){ocrLocal=false;}}
-    if(!window.Tesseract)await new Promise((res,rej)=>{const sc=document.createElement('script');sc.src=ocrLocal?'vendor/tesseract/tesseract.min.js':window.CDN_FALLBACK['vendor/tesseract/tesseract.min.js'];sc.onload=res;sc.onerror=rej;document.head.appendChild(sc);});
+    if(ocrLocal===null){try{const h=await fetch('./heb.traineddata.gz',{method:'HEAD',cache:'no-store'});ocrLocal=h.ok;}catch(e){ocrLocal=false;}}
+    if(!window.Tesseract)await new Promise((res,rej)=>{const sc=document.createElement('script');sc.src=ocrLocal?'tesseract.min.js':window.CDN_FALLBACK['tesseract.min.js'];sc.onload=res;sc.onerror=rej;document.head.appendChild(sc);});
     // bundled files when present; otherwise tesseract.js defaults (worker, core and language data from jsDelivr)
-    const paths=ocrLocal?{workerPath:'vendor/tesseract/worker.min.js',corePath:'vendor/tesseract/core',langPath:'vendor/tesseract/lang',gzip:true}:{};
+    const paths=ocrLocal?{workerPath:'worker.min.js',corePath:'.',langPath:'.',gzip:true}:{};
     if(!ocrWorker)ocrWorker=await Tesseract.createWorker(['heb','eng'],1,{...paths,
       logger:m=>{if(m.status==='recognizing text'&&window.__ocrProg)window.__ocrProg(Math.round(m.progress*100));}});
     return ocrWorker;
