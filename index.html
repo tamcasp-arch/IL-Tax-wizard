@@ -495,7 +495,7 @@ function docsOf(i){return S.docs.filter(d=>d.status!=='reading'&&!needsReview(d)
 function aggregate(i){
   const a={salary:0,withheld:0,btlGross:0,btlTax:0,pensionEmp:0,insured:0,lifeIns:0,keren:0,months:0,n106:0,donDocs:0,pensionDocs:0,lifeDocs:0,capital:0,capitalTax:0,havraa:0,docs106:[]};
   for(const d of docsOf(i)){const f=d.fields||{};
-    if(d.type==='form106'){a.n106++;a.salary+=n(f.salary);a.withheld+=n(f.withheld);a.pensionEmp+=n(f.pensionEmp);a.insured+=n(f.insured);a.lifeIns+=n(f.lifeIns);a.keren+=n(f.keren);a.pensionEr=(a.pensionEr||0)+n(f.pensionEr);a.months+=n(f.months);a.havraa+=n(f.havraa);a.docs106.push(d);}
+    if(d.type==='form106'){a.n106++;a.salary+=n(f.salary);a.withheld+=n(f.withheld);a.pensionEmp+=n(f.pensionEmp);a.insured+=n(f.insured);a.lifeIns+=n(f.lifeIns);a.keren+=n(f.keren);a.pensionEr=(a.pensionEr||0)+n(f.pensionEr);a.months+=n(f.months);a.havraa+=n(f.havraa);a.donDocs+=n(f.donation);a.docs106.push(d);}
     else if(d.type==='btl'){a.btlGross+=n(f.btlGross);a.btlTax+=n(f.btlTax);}
     else if(d.type==='pension'){a.pensionDocs+=n(f.pensionSelf);a.lifeDocs+=n(f.lifeIns);}
     else if(d.type==='donation'){a.donDocs+=n(f.donation);}
@@ -630,7 +630,10 @@ async function pdfToTextAndImages(file,maxImages){
     const its=tc.items.filter(t=>t.str&&t.str.trim()).sort((a,b)=>b.transform[5]-a.transform[5]),rows=[];
     for(const it of its){const y=it.transform[5],r=rows.find(r=>Math.abs(r.y-y)<=3);if(r)r.items.push(it);else rows.push({y,items:[it]});}
     // left to right keeps digit runs (also digit-per-item, e.g. חילן) in reading order
-    rows.forEach(r=>{text+=r.items.sort((a,b)=>a.transform[4]-b.transform[4]).map(t=>t.str).join(' ')+'\n';});
+    // join glyphs that touch (letter-per-item PDFs, e.g. חילן) and put a space only where there is a real gap
+    rows.forEach(r=>{const s=r.items.sort((a,b)=>a.transform[4]-b.transform[4]);let line='';
+      s.forEach((t,j)=>{if(j){const p=s[j-1],gap=t.transform[4]-(p.transform[4]+(p.width||0)),h=Math.abs(t.transform[3])||8;line+=gap>h*0.18?' ':'';}line+=t.str;});
+      text+=line+'\n';});
     text+='\n--- עמוד '+i+' ---\n';}
   const imgs=[],previews=[];
   const scanned=text.replace(/\s|-|עמוד|\d/g,'').length<60;
@@ -642,7 +645,12 @@ async function pdfToTextAndImages(file,maxImages){
     if(i<=maxImages)imgs.push(await new Promise(r=>c.toBlob(r,'image/png')));}
   return {text:normalizeDigits(text),imgs,previews};
 }
-function normalizeDigits(t){ // "3 0 0 , 0 0 0" (spaced digits, e.g. Hilan) -> "300,000"; leaves "158 300,000" (code + amount) apart
+function fixHebEncoding(t){ // Hebrew stored as Windows-1255 bytes read as Latin-1 ("úøåëùî") -> real Hebrew letters
+  const lat=(t.match(/[\u00E0-\u00FA]/g)||[]).length,heb=(t.match(/[\u05D0-\u05EA]/g)||[]).length;
+  return lat>20&&lat>heb*2?t.replace(/[\u00E0-\u00FA]/g,c=>String.fromCharCode(0x05D0+c.charCodeAt(0)-0xE0)):t;
+}
+function normalizeDigits(t){
+  t=fixHebEncoding(t); // "3 0 0 , 0 0 0" (spaced digits, e.g. Hilan) -> "300,000"; leaves "158 300,000" (code + amount) apart
   return t.replace(/(?<![\d,.])\d(?![\d,.])(?:[ \u00A0][\d,.](?![\d,.])){2,}/g,m=>m.replace(/[ \u00A0]/g,'')).replace(/(\d)[ \u00A0]?,[ \u00A0]+(\d{3})(?![\d])/g,'$1,$2').replace(/[\u200e\u200f]/g,'');
 }
 
@@ -710,8 +718,8 @@ async function parseFile(doc,file){
   }
 }
 const KW_MAP=[[/מבוטחת/,'insured'],[/השתלמות/,'keren'],[/(מעביד|מעסיק)[^\n]*(קצבה|פנסיה|גמל)|(קצבה|פנסיה|גמל)[^\n]*(מעביד|מעסיק)/,'pensionEr'],
-  [/(עובד|עמית)[^\n]*(קצבה|פנסיה|גמל)|(קצבה|פנסיה|גמל)[^\n]*(עובד|עמית)/,'pensionEmp'],[/ביטוח חיים/,'lifeIns'],[/הבראה/,'havraa'],[/מס הכנסה|שנוכה/,'withheld'],[/משכורת|חייבת|שכר עבודה/,'salary']];
-function kwMap(label){const t=[label,label.split(' ').map(w=>w.split('').reverse().join('')).reverse().join(' '),label.split('').reverse().join('')];
+  [/(עובד|עמית)[^\n]*(קצבה|פנסיה|גמל)|(קצבה|פנסיה|גמל)[^\n]*(עובד|עמית)/,'pensionEmp'],[/ביטוח ?חיים/,'lifeIns'],[/הבראה/,'havraa'],[/תרומות/,'donation'],[/^מס ?הכנסה|שנוכה/,'withheld'],[/^משכורת|חייבת|שכר ?עבודה/,'salary']];
+function kwMap(label){const ns=label.replace(/\s/g,'');const t=[label,label.split(' ').map(w=>w.split('').reverse().join('')).reverse().join(' '),label.split('').reverse().join(''),ns,ns.split('').reverse().join('')];
   for(const [re,k] of KW_MAP)if(t.some(x=>re.test(x)))return k;return '';}
 function localGuess(doc,text){ // tries the text as is and with digit runs reversed (some PDFs store numbers in visual order); keeps the more plausible read
   const score=d=>(d.allFields||[]).reduce((t,r)=>t+(r.map?(n(r.value)>=100?2:0)+(r.code&&autoMap(d.type,r.code,'')===r.map?1:0):0),0);
@@ -721,24 +729,49 @@ function localGuess(doc,text){ // tries the text as is and with digit runs rever
   if(score(doc)>A.s){doc.reversedDigits=true;return;}
   doc.allFields=A.af;doc.fields=A.f;doc.orig=A.o;doc.evidence=A.ev;
 }
-function localGuessOnce(doc,text){ // offline: every 3-digit form code on a line with its amount; labels help when a scan misreads the code
+function localGuessOnce(doc,text){ // offline: field codes ("158", "172/158", "[172, 158]") with their amount; labels help when a scan misreads a code
   doc.type=doc.type||'form106';doc.fields=doc.fields||{};doc.evidence={};
+  const T=String(text||'');
+  if(!doc.taxYear){ // tax year: the year on the line that says "לשנת (המס)", not a print date
+    const yl=T.split('\n').find(l=>/לשנת|שנת ה?מס|תנשל|סמ ?תנש/.test(l)&&/(?<!\d)20[12]\d(?!\d)/.test(l));
+    const ym=(yl||T.slice(0,600)).match(/(?<![\d\/.])(20[12]\d)(?![\d\/.])/);if(ym)doc.taxYear=+ym[1];}
+  const CM=CODE_MAP[doc.type]||{};
+  const KNOWN=new Set([...Object.keys(CM),...Object.values(FORM_POS).flatMap(p=>Object.keys(p.c))]);
+  const NUM=/(?<![\d,.])(\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?)(?![\d,%])/g;
   const rows=[],seen=new Set(),usedKw=new Set();
-  for(const line of String(text||'').split('\n')){
+  for(const line of T.split('\n')){
     const Lx=line.replace(/\s+/g,' ').trim();if(!Lx)continue;
-    const codes=[...Lx.matchAll(/(?<![\d,.])([0-2]\d{2})(?:\s*\/\s*([0-2]\d{2}))?(?![\d,.])/g)].map(m=>m[1]);
-    const nums=[...Lx.matchAll(/(?<![\d,.])(\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d{4,8}(?:\.\d+)?)(?![\d,])/g)].map(m=>m[1]).filter(x=>!(/^(19|20)\d{2}$/.test(x)));
+    // code: a pair ("172/158", "244 ,245", "[172, 158]") or a single known code
+    let code='',code2='',ci=-1,cl=0;
+    for(const m of Lx.matchAll(/(?<![\d,.])([0-2]\d{2})(?:\s*\/\s*|\s+,\s*|\s*,\s+)([0-2]\d{2})(?![\d,.])/g)){
+      if(!(KNOWN.has(m[1])||KNOWN.has(m[2])))continue;
+      const c=[m[1],m[2]].find(x=>CM[x])||m[1];if(seen.has(c))continue;
+      code=c;code2=c===m[1]?m[2]:m[1];ci=m.index;cl=m[0].length;break;}
+    if(!code)for(const m of Lx.matchAll(/(?<![\d,.\/])([0-2]\d{2})(?![\d,.\/%])/g)){if(KNOWN.has(m[1])&&!seen.has(m[1])){code=m[1];ci=m.index;cl=m[0].length;break;}}
+    const nums=[...Lx.matchAll(NUM)].filter(m=>!(ci>=0&&m.index>=ci&&m.index<ci+cl))
+      .map(m=>({i:m.index,s:m[1],v:n(m[1])}))
+      .filter(x=>!(/^(19|20)\d{2}$/.test(x.s))&&!(/^\d\.\d{1,2}$/.test(x.s)&&x.v<10)&&!(/^\d{5,}$/.test(x.s)&&!/,/.test(x.s)&&x.v>5e6));
     if(!nums.length)continue;
-    const label=Lx.replace(/[\d,.\/()\-:₪]+/g,' ').replace(/\s+/g,' ').trim().slice(0,60);
+    let val;
+    if(code){ // the amount that belongs to the code: the first number after it, else the nearest one before it
+      const after=nums.find(x=>x.i>ci);const before=[...nums].reverse().find(x=>x.i<ci);
+      const pick=after||before;if(!pick)continue;val=pick.v;
+      if(!(val>0)&&CM[code]!=='withheld'){seen.add(code);continue;} // printed as 0 / empty: nothing to take (tax withheld 0 is still a real answer)
+    }else{
+      const big=nums.filter(x=>x.v>=1000||/,/.test(x.s));if(!big.length)continue;val=big[big.length-1].v;
+    }
+    const label=Lx.replace(/[\d,.\/()\[\]\-:;=|₪%]+/g,' ').replace(/\s+/g,' ').trim().slice(0,60);
     const kw=label?kwMap(label):'';
-    const code=codes.find(c=>!seen.has(c))||'';
-    const val=nums.map(n).filter(v=>v>0&&String(v)!==code).pop();if(val===undefined)continue;
-    let map=code?autoMap(doc.type,code,label):'';
-    if(kw&&(doc.ocr||!map)&&!usedKw.has(kw))map=kw;   // in a scan, trust the printed label over a possibly misread code
+    let map=code?autoMap(doc.type,code,label):'',byCode=!!map;
+    if(kw&&(doc.ocr||!map)&&!usedKw.has(kw)){map=kw;byCode=!!code&&autoMap(doc.type,code,label)===kw;}
     if(!code&&!map)continue;
     if(code)seen.add(code);if(map)usedKw.add(map);
-    rows.push({code,label:label||('שדה '+code),value:val,orig:val,map});
+    if(!(val>0)&&map!=='withheld')continue;
+    rows.push({code,code2,label:label||('שדה '+code),value:val,orig:val,map,byCode});
   }
+  // a printed field code beats a label guess for the same field (e.g. "סכום ההפרשה לקרן" vs. 218/219)
+  const coded=new Set(rows.filter(r=>r.byCode&&r.map).map(r=>r.map));
+  rows.forEach(r=>{if(r.map&&!r.byCode&&coded.has(r.map))r.map='';});
   doc.allFields=rows;doc.fields={};syncFromAll(doc,true);doc.orig={...doc.fields};doc.checked={};doc.verified=false;doc.fconf={};
 }
 function applyExtraction(doc,j){
@@ -873,14 +906,15 @@ function checks(d){
     if(f.s46===false||f.s46==='false')c.push({lv:'warn',msg:'בקבלה לא נמצא אישור לפי סעיף 46. בלי אישור תקף, התרומה לא מזכה.'});}
   if(d.type==='form867')c.push({lv:'info',msg:'הכנסות הון ממוסות בנפרד ולא נכנסות לחישוב ההחזר על המשכורת.'});
   if(d.fromFile&&d.status==='done'&&!d.allFields)c.push({lv:'warn',msg:'המסמך פוענח בגרסה קודמת, שקלטה רק חלק מהשדות. לחצו "פענח שוב" כדי לקלוט את כל השדות שבטופס.'});
-  if(d.allFields){const have=new Set(d.allFields.map(r=>r.code));const miss=codesInText(d).filter(c=>!have.has(c));
+  if(d.allFields){const PAIR={'158':'172','172':'158','218':'219','219':'218','244':'245','245':'244','248':'249','249':'248','045':'086','086':'045','036':'081','081':'036','037':'237','237':'037','011':'012','012':'011'};
+    const have=new Set(d.allFields.flatMap(r=>[r.code,r.code2,PAIR[r.code]]));const miss=codesInText(d).filter(c=>!have.has(c));
     if(miss.length)c.push({lv:'warn',msg:`שדות ${miss.join(', ')} מופיעים בטקסט הטופס אבל לא נקלטו. הוסיפו אותם בטבלת כל השדות למטה.`});}
   if(d.confidence==='low')c.push({lv:'warn',msg:'רמת הביטחון בפענוח נמוכה. השוו כל שדה מול המסמך.'});
   for(const[k]of FIELDS[d.type]||[]){if(inText(d,k)===false&&has(k)&&!(d.orig&&d.orig[k]!==f[k]))c.push({lv:'warn',f:k,msg:`הערך בשדה ״${fieldLabel(d.type,k)}״ לא נמצא בטקסט המסמך. השוו מול התמונה.`});}
   return c;
 }
 /* codes printed on Form 106 that feed the calculation (first code = registered spouse, second = spouse). Mapping stays editable in the review screen. */
-const CODE_MAP={form106:{'248':'pensionEr','249':'pensionEr','158':'salary','172':'salary','042':'withheld','218':'keren','219':'keren','011':'havraa','012':'havraa','244':'insured','245':'insured','045':'pensionEmp','086':'pensionEmp','036':'lifeIns','081':'lifeIns'}};
+const CODE_MAP={form106:{'037':'donation','237':'donation','248':'pensionEr','249':'pensionEr','158':'salary','172':'salary','042':'withheld','218':'keren','219':'keren','011':'havraa','012':'havraa','244':'insured','245':'insured','045':'pensionEmp','086':'pensionEmp','036':'lifeIns','081':'lifeIns'}};
 const KNOWN_CODES=Object.keys(CODE_MAP.form106);
 function normCode(c){c=String(c||'').replace(/\D/g,'');if(!c)return '';if(c.length>3&&c.length%3===0)return c;return c.padStart(3,'0');}
 function autoMap(type,code,label){ // "158172" = the 158/172 pair printed as one; skip bases and employer-side amounts for deposit fields
@@ -949,6 +983,7 @@ function renderReview(){
        </div>
        ${d.personName?`<p class="hint" style="margin:0 0 10px">שם בטופס: <b>${esc(d.personName)}</b></p>`:''}
        <ul class="rv-checks" id="rvChecks">${c.map(x=>`<li class="${x.lv}">${esc(x.msg)}</li>`).join('')}</ul>
+       ${d.taxYear&&Number(d.taxYear)!==S.year&&YEARS.includes(Number(d.taxYear))?`<button class="btn small" data-rvmove="${Number(d.taxYear)}" style="margin:-4px 0 12px">העברת המסמך לשנת ${Number(d.taxYear)} והמשך שם</button>`:''}
        <p class="hint" style="margin:0 0 4px">השוו כל ערך מול המסמך שמשמאל, תקנו אם צריך, וסמנו ✓. רק נתונים מאומתים נכנסים לחישוב.</p>
        ${rows}
        ${d.notes?`<div class="note info">${esc(d.notes)}</div>`:''}
@@ -996,7 +1031,7 @@ function approveCurrent(){
 /* ---- step 2 ---- */
 const DOC_TYPES=[['form106','טופס 106 ממעסיק'],['btl','אישור שנתי מביטוח לאומי'],['pension','אישור שנתי מקופה / ביטוח'],['donation','קבלה על תרומה (ס׳ 46)'],['form867','טופס 867 מבנק / בית השקעות'],['form161','טופס 161 (עזיבה)'],['other','אחר']];
 const FIELDS={
-  form106:[['salary','משכורת חייבת','שדה 158 / 172'],['withheld','מס הכנסה שנוכה','שדה 042'],['months','חודשי עבודה',''],['pensionEmp','הפקדות עובד לפנסיה','ניכוי מהשכר'],['insured','משכורת מבוטחת',''],['lifeIns','ביטוח חיים (עובד)',''],['keren','משכורת שבשלה שילם המעביד לקרן השתלמות','שדה 218 / 219'],['pensionEr','הפקדות המעביד לקופת גמל לקצבה','שדה 248 / 249'],['havraa','הפחתת יום הבראה','שדה 011 / 012, לידיעה בלבד']],
+  form106:[['salary','משכורת חייבת','שדה 158 / 172'],['withheld','מס הכנסה שנוכה','שדה 042'],['months','חודשי עבודה',''],['pensionEmp','הפקדות עובד לפנסיה','ניכוי מהשכר'],['insured','משכורת מבוטחת',''],['lifeIns','ביטוח חיים (עובד)',''],['keren','משכורת שבשלה שילם המעביד לקרן השתלמות','שדה 218 / 219'],['pensionEr','הפקדות המעביד לקופת גמל לקצבה','שדה 248 / 249'],['donation','תרומות שנוכו מהשכר (ס׳ 46)','שדה 037 / 237'],['havraa','הפחתת יום הבראה','שדה 011 / 012, לידיעה בלבד']],
   btl:[['btlGross','סכום ברוטו ששולם',''],['btlTax','מס שנוכה בביטוח לאומי','']],
   pension:[['pensionSelf','הפקדה עצמית לפנסיה','מחוץ לתלוש'],['lifeIns','פרמיות ביטוח חיים','']],
   donation:[['donation','סכום התרומה','']],
@@ -1607,6 +1642,11 @@ document.addEventListener('click',e=>{
   if(t.dataset.afadd!==undefined){const d=S.docs[RV];d.allFields=d.allFields||[];d.allFields.push({code:'',label:'',value:'',map:''});save();const sc=$('#review .rv-f').scrollTop;renderReview();$('#review .rv-f').scrollTop=sc;$('#review .afbox').open=true;const ins=document.querySelectorAll('#review [data-afk="code"]');ins[ins.length-1]?.focus();return;}
   if(t.dataset.afdel!==undefined){const d=S.docs[RV];d.allFields.splice(Number(t.dataset.afdel),1);syncFromAll(d);save();const sc=$('#review .rv-f').scrollTop;renderReview();$('#review .rv-f').scrollTop=sc;renderLedger();return;}
   if(t.dataset.rvclose!==undefined){closeReview();return;}
+  if(t.dataset.rvmove!==undefined){ // a form of another tax year: move it into that year's record and keep reviewing there
+    (async()=>{const y=Number(t.dataset.rvmove),d=S.docs.splice(RV,1)[0];RV=-1;$('#review').close();
+      S.updatedAt=Date.now();try{localStorage.setItem(LKEY(S.year),JSON.stringify(serial()));}catch(e){}
+      if(SYNC.db){try{await yearDoc(S.year).set({state:serial(),updatedAt:S.updatedAt,device:DEVICE});}catch(e){}}
+      await changeYear(y);S.docs.push(d);save();render();openReview(S.docs.length-1);})();return;}
   if(t.dataset.rvok!==undefined){approveCurrent();return;}
   if(t.dataset.rvall!==undefined){const d=S.docs[RV];d.checked=d.checked||{};reviewRows(d).forEach(([k])=>d.checked[k]=true);save();renderReview();return;}
   if(t.dataset.rvskip!==undefined){const pend=pendingDocs().filter(x=>x!==S.docs[RV]);const cur=pendingDocs().indexOf(S.docs[RV]);const nx=pendingDocs()[cur+1]||pend[0];if(nx){RV=S.docs.indexOf(nx);renderReview();}return;}
